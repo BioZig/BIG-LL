@@ -1,0 +1,11 @@
+# IEEE RTS-96 Standard Thermal Generation Specifications (Table 7 & Table 9)
+# p_min (MW), p_max (MW), cost_a ($/MW^2), cost_b ($/MW), cost_no_load ($/h)
+unit_id,unit_type,fuel,p_min,p_max,cost_a,cost_b,cost_no_load
+1,U12,Oil_Steam,2.4,12.0,0.0250,25.50,86.4
+2,U20,Combustion_Turbine,5.0,20.0,0.0180,37.50,119.8
+3,U76,Coal_Steam,15.2,76.0,0.0080,13.50,81.1
+4,U100,Oil,25.0,100.0,0.0060,21.00,217.9
+5,U155,Coal,54.3,155.0,0.0020,10.70,142.1
+6,U197,Oil,69.0,197.0,0.0015,23.00,259.6
+7,U350,Coal,140.0,350.0,0.0005,10.80,177.1
+8,U400,Nuclear,100.0,400.0,0.0002,5.60,395.4
