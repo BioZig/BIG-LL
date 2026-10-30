@@ -28,8 +28,16 @@ echo "=== Step 4/5: Apple Silicon Dedicated Metal GPU Batch Evaluation ==="
 zig build bench-metal ${CACHE_FLAGS}
 
 echo ""
-echo "=== Step 5/5: Synthetic Industrial Domain Suite (6 Domains x 3 Tiers) ==="
+echo "=== Step 5/7: Synthetic Industrial Domain Suite (6 Domains x 3 Tiers) ==="
 zig build bench-domains ${CACHE_FLAGS}
+
+echo ""
+echo "=== Step 6/7: Scaled Multi-Batch L2 Cache Tiling Benchmark (L=256..8192) ==="
+zig build bench-scaled ${CACHE_FLAGS}
+
+echo ""
+echo "=== Step 7/7: Real-World Industrial Dataset Suite (CVRPLIB, IEEE, S&P 500, etc.) ==="
+zig build bench-real ${CACHE_FLAGS}
 
 echo ""
 echo "[BIG-LL] Benchmark Pipeline Completed Successfully."

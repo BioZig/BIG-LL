@@ -34,6 +34,9 @@ jobs:
       - name: Run Real-World Domain Benchmarks
         run: zig build bench-real
 
+      - name: Run Scaled Multi-Batch L2 Cache Tiling Benchmark (L=256..8192)
+        run: zig build bench-scaled
+
       - name: Test CLI Solver (Logistics Island Parallel)
         run: ./zig-out/bin/big_ll solve data/real/logistics/cvrplib_An33k5.bigd --pop 512 --gens 50 --islands 4
 
@@ -66,6 +69,9 @@ jobs:
 
       - name: Run Real-World Domain Benchmarks
         run: zig build bench-real
+
+      - name: Run Scaled Multi-Batch L2 Cache Tiling Benchmark (L=256..8192)
+        run: zig build bench-scaled
 
       - name: Test CLI Solver (Power Grid Single Core JSON)
         run: ./zig-out/bin/big_ll solve data/real/power_grid/ieee_rts96.bigd --pop 512 --gens 50 --islands 1 --json

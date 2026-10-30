@@ -151,8 +151,12 @@ zig build bench-domains
 # 6. Run real-world industrial datasets benchmark (CVRPLIB, IEEE RTS-96, S&P 500, etc.):
 zig build bench-real
 
-# 7. Run BIG-LL CLI interactive solver:
-zig build run
+# 7. Run scaled multi-batch L2 cache tiling benchmark (L=256..8192):
+zig build bench-scaled
+
+# 8. Solve an optimization instance directly via CLI:
+./zig-out/bin/big_ll solve data/real/logistics/cvrplib_An33k5.bigd --pop 1024 --gens 200 --islands 4
+./zig-out/bin/big_ll solve data/real/finance/sp500_portfolio.bigd --pop 512 --gens 100 --json
 ```
 
 ---
@@ -166,6 +170,7 @@ big-ll/
 │   ├── bench_throughput.zig    # CPU multi-core & island scaling benchmarks
 │   ├── bench_domains.zig       # Synthetic domain benchmark suite
 │   ├── bench_real_domains.zig  # Real-world industrial dataset benchmarks
+│   ├── bench_scaled.zig        # Scaled multi-batch L2 cache tiling benchmarks (L=256..8192)
 │   └── bench_memory.zig        # Zero-allocation memory invariant verification
 ├── src/
 │   ├── adapters/               # Gray Code, Random Key, MINLP, Boolean Set

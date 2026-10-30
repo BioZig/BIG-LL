@@ -166,6 +166,21 @@ pub fn build(b: *std.Build) void {
     const bench_real_step = b.step("bench-real", "Run real-world industrial benchmarks");
     bench_real_step.dependOn(&run_bench_real.step);
 
+    const bench_scaled_exe = b.addExecutable(.{
+        .name = "bench_scaled",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("benchmarks/bench_scaled.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+            .imports = &.{
+                .{ .name = "big_ll", .module = bench_core_mod },
+            },
+        }),
+    });
+    const run_bench_scaled = b.addRunArtifact(bench_scaled_exe);
+    const bench_scaled_step = b.step("bench-scaled", "Run scaled multi-batch L2 cache tiling benchmarks (L=256..8192)");
+    bench_scaled_step.dependOn(&run_bench_scaled.step);
+
     // Apple Silicon Dedicated Metal GPU Batch Acceleration Benchmark
     if (is_darwin) {
         const bench_metal_exe = b.addExecutable(.{
