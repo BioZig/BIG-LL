@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  macos-apple-silicon:
+    name: macOS Apple Silicon (M1/M2)
+    runs-on: macos-14
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: master
+
+      - name: Build Core Engine & Executables
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Run Unit & Integration Tests (83 Tests)
+        run: zig build test --summary all
+
+      - name: Verify Zero-Allocation Invariant (Memory Audit)
+        run: zig build bench-mem
+
+      - name: Run Dedicated Metal GPU Benchmark
+        run: zig build bench-metal
+
+      - name: Run Real-World Domain Benchmarks
+        run: zig build bench-real
+
+      - name: Test CLI Solver (Logistics Island Parallel)
+        run: ./zig-out/bin/big_ll solve data/real/logistics/cvrplib_An33k5.bigd --pop 512 --gens 50 --islands 4
+
+      - name: Test CLI Solver (Finance JSON Telemetry)
+        run: ./zig-out/bin/big_ll solve data/real/finance/sp500_portfolio.bigd --pop 512 --gens 50 --islands 1 --json
+
+  linux-x86_64:
+    name: Linux x86_64 (AVX2 Fallback)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: master
+
+      - name: Build Core Engine & Executables
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Run Unit & Integration Tests
+        run: zig build test --summary all
+
+      - name: Verify Zero-Allocation Invariant (Memory Audit)
+        run: zig build bench-mem
+
+      - name: Run Synthetic Domain Benchmarks
+        run: zig build bench-domains
+
+      - name: Run Real-World Domain Benchmarks
+        run: zig build bench-real
+
+      - name: Test CLI Solver (Power Grid Single Core JSON)
+        run: ./zig-out/bin/big_ll solve data/real/power_grid/ieee_rts96.bigd --pop 512 --gens 50 --islands 1 --json
