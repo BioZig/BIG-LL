@@ -1,12 +1,48 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const big_ll = @import("big_ll");
 const GeneticEngine = big_ll.GeneticEngine;
 
+var timebase_factor: f64 = 1.0;
+var timebase_initialized: bool = false;
+
+fn initTimer() void {
+    if (builtin.os.tag == .macos or builtin.os.tag == .ios or builtin.os.tag == .watchos or builtin.os.tag == .tvos) {
+        var info: std.c.mach_timebase_info_data = undefined;
+        _ = std.c.mach_timebase_info(&info);
+        timebase_factor = @as(f64, @floatFromInt(info.numer)) / @as(f64, @floatFromInt(info.denom));
+    }
+    timebase_initialized = true;
+}
+
+fn getTimestampNs() u64 {
+    if (!timebase_initialized) initTimer();
+    if (builtin.os.tag == .macos or builtin.os.tag == .ios or builtin.os.tag == .watchos or builtin.os.tag == .tvos) {
+        const ticks = std.c.mach_absolute_time();
+        return @intFromFloat(@as(f64, @floatFromInt(ticks)) * timebase_factor);
+    } else if (builtin.os.tag == .linux) {
+        var ts: std.os.linux.timespec = undefined;
+        _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
+        return @as(u64, @intCast(ts.tv_sec)) * 1_000_000_000 + @as(u64, @intCast(ts.tv_nsec));
+    } else {
+        return 0;
+    }
+}
+
 fn printUsage() void {
     std.debug.print(
-        \\Usage: big-ll <command> [arguments]
+        \\Usage: big-ll <command> [options]
         \\
         \\Commands:
+        \\  solve <file.bigd> [options]    Solve an optimization problem from a .bigd file
+        \\                                 Options:
+        \\                                   --pop <int>       Population size (default: 1024)
+        \\                                   --gens <int>      Generations budget (default: 200)
+        \\                                   --islands <1|4|8> Core island count (default: 4)
+        \\                                   --seed <int>      PRNG seed (default: 42)
+        \\                                   --dedup <bool>    Toggle clone filter (default: true)
+        \\                                   --json            Output results as JSON
+        \\                                   --quiet, -q       Suppress interactive progress
         \\  inspect <file.bigd>            Memory-map and inspect a .bigd dataset
         \\  generate <domain> <out.bigd>   Generate a synthetic .bigd binary file
         \\                                 Domains: logistics, power_grid, finance,
@@ -19,12 +55,239 @@ fn printUsage() void {
         \\  help                           Print this command-line manual
         \\
         \\Examples:
-        \\  big-ll generate logistics sample_logistics.bigd
-        \\  big-ll generate-suite data/synthetic
-        \\  big-ll inspect data/synthetic/logistics/c32_standard.bigd
+        \\  big-ll solve data/real/logistics/cvrplib_An33k5.bigd --pop 2048 --gens 300
+        \\  big-ll solve data/real/finance/sp500_portfolio.bigd --islands 4 --json
+        \\  big-ll inspect data/real/power_grid/ieee_rts96.bigd
         \\  big-ll demo
         \\
     , .{});
+}
+
+pub const SolveOptions = struct {
+    pop_size: usize = 1024,
+    gens: usize = 200,
+    islands: usize = 4,
+    seed: u64 = 42,
+    enable_dedup: bool = true,
+    json: bool = false,
+    quiet: bool = false,
+};
+
+fn runSingle(
+    comptime L: usize,
+    comptime Domain: type,
+    comptime enable_dedup: bool,
+    domain: Domain,
+    options: SolveOptions,
+    allocator: std.mem.Allocator,
+    best_fit: *f64,
+    mean_fit: *f64,
+    final_entropy: *f64,
+) !void {
+    const Engine = big_ll.GeneticEngineCustom(L, Domain, .{ .enable_dedup = enable_dedup, .num_threads = 1 });
+    const eng = try allocator.create(Engine);
+    defer allocator.destroy(eng);
+    eng.* = try Engine.init(allocator, options.pop_size, domain, options.seed);
+    defer eng.deinit();
+
+    for (0..options.gens) |g| {
+        try eng.step();
+        if (!options.quiet and !options.json and (g % 20 == 0 or g + 1 == options.gens)) {
+            const pct = (@as(f64, @floatFromInt(g + 1)) / @as(f64, @floatFromInt(options.gens))) * 100.0;
+            std.debug.print("\r[Gen {d:>4}/{d}] {d:>5.1}% | Best: {d:>10.4} | Mean: {d:>10.4} | Entropy: {d:.4} | Dedup: {d:>4.1}%", .{
+                g + 1,
+                options.gens,
+                pct,
+                eng.getBest().fitness,
+                eng.pop_current.mean_fitness,
+                eng.pop_current.entropy,
+                eng.dedup_cache.hitRatio() * 100.0,
+            });
+        }
+    }
+    best_fit.* = eng.getBest().fitness;
+    final_entropy.* = eng.pop_current.entropy;
+    mean_fit.* = eng.pop_current.mean_fitness;
+}
+
+fn executeSolve(
+    comptime L: usize,
+    comptime Domain: type,
+    domain: Domain,
+    domain_name: []const u8,
+    file_path: []const u8,
+    options: SolveOptions,
+    allocator: std.mem.Allocator,
+) !void {
+    if (!options.json and !options.quiet) {
+        std.debug.print("BIG-LL Industrial Genetic Solver\n", .{});
+        std.debug.print("Instance:     {s}\n", .{file_path});
+        std.debug.print("Domain:       {s} (L={d})\n", .{ domain_name, L });
+        std.debug.print("Topology:     {d}-island(s) | Pop: {d} | Gens: {d} | Seed: {d}\n\n", .{
+            options.islands,
+            options.pop_size,
+            options.gens,
+            options.seed,
+        });
+    }
+
+    const t_start = getTimestampNs();
+    var best_fit: f64 = 0.0;
+    var final_entropy: f64 = 0.0;
+    var mean_fit: f64 = 0.0;
+
+    if (options.islands == 1) {
+        if (options.enable_dedup) {
+            try runSingle(L, Domain, true, domain, options, allocator, &best_fit, &mean_fit, &final_entropy);
+        } else {
+            try runSingle(L, Domain, false, domain, options, allocator, &best_fit, &mean_fit, &final_entropy);
+        }
+    } else if (options.islands == 4) {
+        const Islands = big_ll.IslandEngine(L, Domain, 4, 25);
+        const eng = try allocator.create(Islands);
+        defer allocator.destroy(eng);
+        eng.* = try Islands.init(allocator, options.pop_size, domain, options.seed);
+        defer eng.deinit();
+
+        var completed: usize = 0;
+        while (completed < options.gens) {
+            const step_len = @min(25, options.gens - completed);
+            try eng.stepCount(step_len);
+            completed += step_len;
+            if (!options.quiet and !options.json and (completed % 25 == 0 or completed == options.gens)) {
+                const pct = (@as(f64, @floatFromInt(completed)) / @as(f64, @floatFromInt(options.gens))) * 100.0;
+                std.debug.print("\r[Gen {d:>4}/{d}] {d:>5.1}% | Best: {d:>10.4} | Mean: {d:>10.4} | Entropy: {d:.4}", .{
+                    completed,
+                    options.gens,
+                    pct,
+                    eng.getGlobalBest().fitness,
+                    eng.getMeanFitness(),
+                    eng.getGlobalEntropy(),
+                });
+            }
+        }
+        best_fit = eng.getGlobalBest().fitness;
+        final_entropy = eng.getGlobalEntropy();
+        mean_fit = eng.getMeanFitness();
+    } else if (options.islands == 8) {
+        const Islands = big_ll.IslandEngine(L, Domain, 8, 25);
+        const eng = try allocator.create(Islands);
+        defer allocator.destroy(eng);
+        eng.* = try Islands.init(allocator, options.pop_size, domain, options.seed);
+        defer eng.deinit();
+
+        var completed: usize = 0;
+        while (completed < options.gens) {
+            const step_len = @min(25, options.gens - completed);
+            try eng.stepCount(step_len);
+            completed += step_len;
+            if (!options.quiet and !options.json and (completed % 25 == 0 or completed == options.gens)) {
+                const pct = (@as(f64, @floatFromInt(completed)) / @as(f64, @floatFromInt(options.gens))) * 100.0;
+                std.debug.print("\r[Gen {d:>4}/{d}] {d:>5.1}% | Best: {d:>10.4} | Mean: {d:>10.4} | Entropy: {d:.4}", .{
+                    completed,
+                    options.gens,
+                    pct,
+                    eng.getGlobalBest().fitness,
+                    eng.getMeanFitness(),
+                    eng.getGlobalEntropy(),
+                });
+            }
+        }
+        best_fit = eng.getGlobalBest().fitness;
+        final_entropy = eng.getGlobalEntropy();
+        mean_fit = eng.getMeanFitness();
+    } else {
+        std.debug.print("error: unsupported island count {d}. Use 1, 4, or 8.\n", .{options.islands});
+        return error.UnsupportedIslandCount;
+    }
+
+    const t_end = getTimestampNs();
+    const total_ns = t_end - t_start;
+    const total_sec = @as(f64, @floatFromInt(total_ns)) / 1_000_000_000.0;
+    const total_evals = options.pop_size * options.gens;
+    const evals_per_sec = @as(f64, @floatFromInt(total_evals)) / total_sec;
+    const us_per_gen = (@as(f64, @floatFromInt(total_ns)) / @as(f64, @floatFromInt(options.gens))) / 1_000.0;
+
+    if (options.json) {
+        std.debug.print(
+            \\{{
+            \\  "file": "{s}",
+            \\  "domain": "{s}",
+            \\  "chrom_len": {d},
+            \\  "pop_size": {d},
+            \\  "generations": {d},
+            \\  "islands": {d},
+            \\  "elapsed_sec": {d:.6},
+            \\  "evals_per_sec": {d:.2},
+            \\  "us_per_gen": {d:.2},
+            \\  "best_fitness": {d:.6},
+            \\  "mean_fitness": {d:.6},
+            \\  "final_entropy": {d:.6}
+            \\}}
+            \\
+        , .{
+            file_path,
+            domain_name,
+            L,
+            options.pop_size,
+            options.gens,
+            options.islands,
+            total_sec,
+            evals_per_sec,
+            us_per_gen,
+            best_fit,
+            mean_fit,
+            final_entropy,
+        });
+    } else {
+        std.debug.print("\n\nSolution Summary:\n", .{});
+        std.debug.print("  Best Fitness:   {d:.6}\n", .{best_fit});
+        std.debug.print("  Mean Fitness:   {d:.6}\n", .{mean_fit});
+        std.debug.print("  Elapsed Time:   {d:.2} ms\n", .{total_sec * 1000.0});
+        std.debug.print("  Throughput:     {d:.2} evals/sec ({d:.2} us/gen)\n", .{ evals_per_sec, us_per_gen });
+        std.debug.print("  Final Entropy:  {d:.4}\n", .{final_entropy});
+    }
+}
+
+fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.Allocator) !void {
+    const file_path_z = try allocator.dupeZ(u8, file_path);
+    defer allocator.free(file_path_z);
+
+    var inst = big_ll.MemoryMappedInstance.openFile(file_path_z) catch |err| {
+        std.debug.print("error: failed to open '{s}': {s}\n", .{ file_path, @errorName(err) });
+        return;
+    };
+    defer inst.deinit();
+
+    const hdr = inst.header();
+    const domain_tag: big_ll.DomainTag = @enumFromInt(hdr.domain_tag);
+
+    switch (domain_tag) {
+        .logistics => {
+            const dom = try big_ll.LogisticsDomain.initFromInstance(&inst);
+            try executeSolve(big_ll.LogisticsDomain.CHROM_LEN, big_ll.LogisticsDomain, dom, "logistics", file_path, options, allocator);
+        },
+        .power_grid => {
+            const dom = try big_ll.PowerGridDomain.initFromInstance(&inst);
+            try executeSolve(big_ll.PowerGridDomain.CHROM_LEN, big_ll.PowerGridDomain, dom, "power_grid", file_path, options, allocator);
+        },
+        .finance => {
+            const dom = try big_ll.FinanceDomain.initFromInstance(&inst);
+            try executeSolve(big_ll.FinanceDomain.CHROM_LEN, big_ll.FinanceDomain, dom, "finance", file_path, options, allocator);
+        },
+        .bioinformatics => {
+            const dom = try big_ll.BioinformaticsDomain.initFromInstance(&inst);
+            try executeSolve(big_ll.BioinformaticsDomain.CHROM_LEN, big_ll.BioinformaticsDomain, dom, "bioinformatics", file_path, options, allocator);
+        },
+        .airfoil => {
+            const dom = try big_ll.AirfoilDomain.initFromInstance(&inst);
+            try executeSolve(big_ll.AirfoilDomain.CHROM_LEN, big_ll.AirfoilDomain, dom, "airfoil", file_path, options, allocator);
+        },
+        .telecom => {
+            const dom = try big_ll.TelecomDomain.initFromInstance(&inst);
+            try executeSolve(big_ll.TelecomDomain.CHROM_LEN, big_ll.TelecomDomain, dom, "telecom", file_path, options, allocator);
+        },
+    }
 }
 
 fn cmdInspect(path: []const u8, allocator: std.mem.Allocator) !void {
@@ -287,12 +550,71 @@ pub fn main(init: std.process.Init) !void {
     _ = it.next(); // Skip binary path
 
     const cmd = it.next() orelse {
-        // No args: run default demo
         try cmdDemo(allocator);
         return;
     };
 
-    if (std.mem.eql(u8, cmd, "inspect")) {
+    if (std.mem.eql(u8, cmd, "solve")) {
+        const file_path = it.next() orelse {
+            std.debug.print("error: missing file path.\nusage: big-ll solve <file.bigd> [--pop N] [--gens G] [--islands 1|4|8] [--seed S] [--dedup true|false] [--json] [--quiet]\n", .{});
+            return;
+        };
+
+        var options = SolveOptions{};
+        while (it.next()) |arg| {
+            if (std.mem.eql(u8, arg, "--pop")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --pop requires an integer argument\n", .{});
+                    return;
+                };
+                options.pop_size = std.fmt.parseInt(usize, val_str, 10) catch {
+                    std.debug.print("error: invalid integer for --pop: '{s}'\n", .{val_str});
+                    return;
+                };
+            } else if (std.mem.eql(u8, arg, "--gens")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --gens requires an integer argument\n", .{});
+                    return;
+                };
+                options.gens = std.fmt.parseInt(usize, val_str, 10) catch {
+                    std.debug.print("error: invalid integer for --gens: '{s}'\n", .{val_str});
+                    return;
+                };
+            } else if (std.mem.eql(u8, arg, "--islands")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --islands requires 1, 4, or 8\n", .{});
+                    return;
+                };
+                options.islands = std.fmt.parseInt(usize, val_str, 10) catch {
+                    std.debug.print("error: invalid integer for --islands: '{s}'\n", .{val_str});
+                    return;
+                };
+            } else if (std.mem.eql(u8, arg, "--seed")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --seed requires an integer argument\n", .{});
+                    return;
+                };
+                options.seed = std.fmt.parseInt(u64, val_str, 10) catch {
+                    std.debug.print("error: invalid integer for --seed: '{s}'\n", .{val_str});
+                    return;
+                };
+            } else if (std.mem.eql(u8, arg, "--dedup")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --dedup requires true or false\n", .{});
+                    return;
+                };
+                options.enable_dedup = std.mem.eql(u8, val_str, "true") or std.mem.eql(u8, val_str, "1");
+            } else if (std.mem.eql(u8, arg, "--json")) {
+                options.json = true;
+            } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {
+                options.quiet = true;
+            } else {
+                std.debug.print("warning: unrecognized option '{s}'\n", .{arg});
+            }
+        }
+
+        try cmdSolve(file_path, options, allocator);
+    } else if (std.mem.eql(u8, cmd, "inspect")) {
         const file_path = it.next() orelse {
             std.debug.print("error: missing file path. usage: big-ll inspect <file.bigd>\n", .{});
             return;
