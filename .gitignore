@@ -1,0 +1,13 @@
+# Build and cache artifacts
+.zig-cache/
+zig-out/
+
+# Binary objects
+*.o
+*.obj
+*.dylib
+*.a
+
+# OS metadata
+.DS_Store
+Thumbs.db
