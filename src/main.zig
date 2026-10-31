@@ -264,12 +264,45 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
 
     switch (domain_tag) {
         .logistics => {
-            const dom = try big_ll.LogisticsDomain.initFromInstance(&inst);
-            try executeSolve(big_ll.LogisticsDomain.CHROM_LEN, big_ll.LogisticsDomain, dom, "logistics", file_path, options, allocator);
+            switch (hdr.param_u32_0) {
+                31 => {
+                    const Dom = big_ll.ParameterizedLogisticsDomain(31, 16);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
+                },
+                32 => {
+                    const Dom = big_ll.ParameterizedLogisticsDomain(32, 16);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
+                },
+                64 => {
+                    const Dom = big_ll.ParameterizedLogisticsDomain(64, 16);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
+                },
+                else => {
+                    std.debug.print("error: unsupported customer count {d} for logistics domain. Supported: 31, 32, 64.\n", .{hdr.param_u32_0});
+                    return error.UnsupportedCustomerCount;
+                },
+            }
         },
         .power_grid => {
-            const dom = try big_ll.PowerGridDomain.initFromInstance(&inst);
-            try executeSolve(big_ll.PowerGridDomain.CHROM_LEN, big_ll.PowerGridDomain, dom, "power_grid", file_path, options, allocator);
+            switch (hdr.param_u32_0) {
+                8 => {
+                    const Dom = big_ll.ParameterizedPowerGridDomain(8, 16, 150.0);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
+                },
+                32 => {
+                    const Dom = big_ll.ParameterizedPowerGridDomain(32, 16, 450.0);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
+                },
+                else => {
+                    std.debug.print("error: unsupported generator count {d} for power grid domain. Supported: 8, 32.\n", .{hdr.param_u32_0});
+                    return error.UnsupportedGeneratorCount;
+                },
+            }
         },
         .finance => {
             const dom = try big_ll.FinanceDomain.initFromInstance(&inst);

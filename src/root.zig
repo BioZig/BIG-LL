@@ -60,6 +60,12 @@ pub const BioinformaticsDomain = bioinformatics.BioinformaticsDomain;
 pub const FinanceDomain = finance.FinanceDomain;
 pub const TelecomDomain = telecom.TelecomDomain;
 
+pub const ParameterizedLogisticsDomain = logistics.ParameterizedLogisticsDomain;
+pub const ParameterizedPowerGridDomain = power_grid.ParameterizedPowerGridDomain;
+pub const ParameterizedFinanceDomain = finance.ParameterizedFinanceDomain;
+pub const ParameterizedBioinformaticsDomain = bioinformatics.ParameterizedBioinformaticsDomain;
+pub const ParameterizedTelecomDomain = telecom.ParameterizedTelecomDomain;
+
 pub const SharedMemoryRegion = shm.SharedMemoryRegion;
 pub const SharedPopulationHeader = shm.SharedPopulationHeader;
 pub const BigLlEvalFn = c_api.BigLlEvalFn;

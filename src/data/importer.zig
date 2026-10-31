@@ -629,54 +629,69 @@ pub fn ingestAllRealDatasets(
     raw_dir: []const u8,
     out_dir: []const u8,
 ) !void {
-    // 1. Logistics: CVRPLIB A-n33-k5
+    // 1. Logistics: CVRPLIB Instances (A-n32-k5, A-n33-k5, A-n65-k9)
     {
-        const in_path = try std.fs.path.join(allocator, &[_][]const u8{ raw_dir, "logistics", "A-n33-k5.vrp" });
-        defer allocator.free(in_path);
-        const in_path_z = try allocator.dupeZ(u8, in_path);
-        defer allocator.free(in_path_z);
-
-        const content = try readFileAlloc(allocator, in_path_z);
-        defer allocator.free(content);
-
-        const buf = try parseCvrpLib(allocator, content);
-        defer allocator.free(buf);
+        const vrp_files = [_]struct { in: []const u8, out: []const u8 }{
+            .{ .in = "A-n32-k5.vrp", .out = "cvrplib_An32k5.bigd" },
+            .{ .in = "A-n33-k5.vrp", .out = "cvrplib_An33k5.bigd" },
+            .{ .in = "A-n65-k9.vrp", .out = "cvrplib_An65k9.bigd" },
+        };
 
         const out_sub = try std.fs.path.join(allocator, &[_][]const u8{ out_dir, "logistics" });
         defer allocator.free(out_sub);
         try generator.makePath(allocator, out_sub);
 
-        const out_file = try std.fs.path.join(allocator, &[_][]const u8{ out_sub, "cvrplib_An33k5.bigd" });
-        defer allocator.free(out_file);
-        const out_file_z = try allocator.dupeZ(u8, out_file);
-        defer allocator.free(out_file_z);
+        for (vrp_files) |vf| {
+            const in_path = try std.fs.path.join(allocator, &[_][]const u8{ raw_dir, "logistics", vf.in });
+            defer allocator.free(in_path);
+            const in_path_z = try allocator.dupeZ(u8, in_path);
+            defer allocator.free(in_path_z);
 
-        try generator.saveToFile(out_file_z, buf);
+            const content = readFileAlloc(allocator, in_path_z) catch continue;
+            defer allocator.free(content);
+
+            const buf = try parseCvrpLib(allocator, content);
+            defer allocator.free(buf);
+
+            const out_file = try std.fs.path.join(allocator, &[_][]const u8{ out_sub, vf.out });
+            defer allocator.free(out_file);
+            const out_file_z = try allocator.dupeZ(u8, out_file);
+            defer allocator.free(out_file_z);
+
+            try generator.saveToFile(out_file_z, buf);
+        }
     }
 
-    // 2. Power Grid: IEEE RTS-96 Thermal
+    // 2. Power Grid: IEEE RTS-96 (8-Unit and Full 32-Unit Fleet)
     {
-        const in_path = try std.fs.path.join(allocator, &[_][]const u8{ raw_dir, "power_grid", "ieee_rts96_thermal.csv" });
-        defer allocator.free(in_path);
-        const in_path_z = try allocator.dupeZ(u8, in_path);
-        defer allocator.free(in_path_z);
-
-        const content = try readFileAlloc(allocator, in_path_z);
-        defer allocator.free(content);
-
-        const buf = try parsePowerGridCsv(allocator, content, 850.0, 950.0);
-        defer allocator.free(buf);
+        const grid_configs = [_]struct { in: []const u8, out: []const u8, demand: f64, reserve: f64 }{
+            .{ .in = "ieee_rts96_thermal.csv", .out = "ieee_rts96.bigd", .demand = 850.0, .reserve = 950.0 },
+            .{ .in = "ieee_rts96_32gen_thermal.csv", .out = "ieee_rts96_32gen.bigd", .demand = 2400.0, .reserve = 2760.0 },
+        };
 
         const out_sub = try std.fs.path.join(allocator, &[_][]const u8{ out_dir, "power_grid" });
         defer allocator.free(out_sub);
         try generator.makePath(allocator, out_sub);
 
-        const out_file = try std.fs.path.join(allocator, &[_][]const u8{ out_sub, "ieee_rts96.bigd" });
-        defer allocator.free(out_file);
-        const out_file_z = try allocator.dupeZ(u8, out_file);
-        defer allocator.free(out_file_z);
+        for (grid_configs) |gc| {
+            const in_path = try std.fs.path.join(allocator, &[_][]const u8{ raw_dir, "power_grid", gc.in });
+            defer allocator.free(in_path);
+            const in_path_z = try allocator.dupeZ(u8, in_path);
+            defer allocator.free(in_path_z);
 
-        try generator.saveToFile(out_file_z, buf);
+            const content = readFileAlloc(allocator, in_path_z) catch continue;
+            defer allocator.free(content);
+
+            const buf = try parsePowerGridCsv(allocator, content, gc.demand, gc.reserve);
+            defer allocator.free(buf);
+
+            const out_file = try std.fs.path.join(allocator, &[_][]const u8{ out_sub, gc.out });
+            defer allocator.free(out_file);
+            const out_file_z = try allocator.dupeZ(u8, out_file);
+            defer allocator.free(out_file_z);
+
+            try generator.saveToFile(out_file_z, buf);
+        }
     }
 
     // 3. Finance: S&P 500 Daily Returns
