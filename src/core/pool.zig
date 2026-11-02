@@ -16,11 +16,12 @@ pub fn setWorkerQoSAffinity(worker_id: usize) void {
     } else if (builtin.os.tag == .linux) {
         // Pin worker thread to physical core (worker_id % 128)
         var cpuset: std.os.linux.cpu_set_t = std.mem.zeroes(std.os.linux.cpu_set_t);
-        const cpu_id = worker_id % 128;
-        const mask_idx = cpu_id / 64;
-        const bit_idx: u6 = @intCast(cpu_id % 64);
-        cpuset.mask[mask_idx] |= (@as(usize, 1) << bit_idx);
-        _ = std.os.linux.sched_setaffinity(0, &cpuset);
+        const cpu_id = worker_id % (std.os.linux.CPU_SETSIZE * 8);
+        const word_bits = @sizeOf(usize) * 8;
+        const mask_idx = cpu_id / word_bits;
+        const bit_idx: u6 = @intCast(cpu_id % word_bits);
+        cpuset[mask_idx] |= (@as(usize, 1) << bit_idx);
+        std.os.linux.sched_setaffinity(0, &cpuset) catch {};
     }
 }
 
@@ -30,8 +31,8 @@ pub fn setHighPerformanceAffinity() void {
     } else if (builtin.os.tag == .linux) {
         // Pin main thread to core 0
         var cpuset: std.os.linux.cpu_set_t = std.mem.zeroes(std.os.linux.cpu_set_t);
-        cpuset.mask[0] |= 1;
-        _ = std.os.linux.sched_setaffinity(0, &cpuset);
+        cpuset[0] |= 1;
+        std.os.linux.sched_setaffinity(0, &cpuset) catch {};
     }
 }
 
