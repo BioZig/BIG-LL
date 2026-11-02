@@ -495,7 +495,8 @@ pub fn parseBioinformaticsGwas(
     return buffer;
 }
 
-/// Parses UIUC .dat coordinate file into Airfoil .bigd container
+/// Parses UIUC .dat coordinate file into Airfoil .bigd container.
+/// Supports both Lednicer format (title, count line, upper, lower) and Selig format (clockwise profile).
 pub fn parseAirfoilDat(
     allocator: std.mem.Allocator,
     dat_text: []const u8,
@@ -505,10 +506,18 @@ pub fn parseAirfoilDat(
     var pts: std.ArrayList(Point) = .empty;
     defer pts.deinit(allocator);
 
+    var expected_upper: usize = 0;
+    var expected_lower: usize = 0;
+    var line_idx: usize = 0;
+
     var lines = std.mem.splitScalar(u8, dat_text, '\n');
     while (lines.next()) |raw_line| {
         const line = std.mem.trim(u8, raw_line, " \r\t");
         if (line.len == 0 or line[0] == '#') continue;
+        line_idx += 1;
+
+        // Skip title line (first non-empty line)
+        if (line_idx == 1) continue;
 
         var it = std.mem.tokenizeAny(u8, line, " \t,");
         const x_str = it.next() orelse continue;
@@ -517,13 +526,56 @@ pub fn parseAirfoilDat(
         const x = std.fmt.parseFloat(f64, x_str) catch continue;
         const y = std.fmt.parseFloat(f64, y_str) catch continue;
 
-        // Filter out header row (e.g. "66. 66."): airfoil spline coordinates are normalized in [-0.2, 1.2]
+        // Check if second line is a Lednicer count line (e.g. "66. 66." or "61.0 61.0")
+        if (line_idx == 2 and x >= 2.0 and y >= 2.0) {
+            expected_upper = @intFromFloat(x);
+            expected_lower = @intFromFloat(y);
+            continue;
+        }
+
+        // Airfoil spline coordinates are normalized in [-0.2, 1.2]
         if (x >= -0.2 and x <= 1.2 and y >= -1.0 and y <= 1.0) {
             try pts.append(allocator, .{ .x = x, .y = y });
         }
     }
 
     const num_pts = pts.items.len;
+    var num_upper: usize = 0;
+    var num_lower: usize = 0;
+
+    if (expected_upper > 0 and expected_lower > 0 and num_pts == expected_upper + expected_lower) {
+        num_upper = expected_upper;
+        num_lower = expected_lower;
+    } else if (num_pts > 0) {
+        // Detect split between upper and lower surface
+        // If Lednicer without header: x restarts from 0 after increasing towards 1
+        var split_idx: usize = num_pts / 2;
+        var found_split = false;
+        for (1..num_pts) |i| {
+            if (pts.items[i].x < pts.items[i - 1].x and pts.items[i].x <= 0.05 and pts.items[i - 1].x >= 0.5) {
+                split_idx = i;
+                found_split = true;
+                break;
+            }
+        }
+        if (!found_split) {
+            // Check for Selig format (minimum x represents the leading edge)
+            var min_x = pts.items[0].x;
+            var min_idx: usize = 0;
+            for (pts.items, 0..) |p, i| {
+                if (p.x < min_x) {
+                    min_x = p.x;
+                    min_idx = i;
+                }
+            }
+            if (min_idx > 0 and min_idx + 1 < num_pts) {
+                split_idx = min_idx + 1;
+            }
+        }
+        num_upper = split_idx;
+        num_lower = num_pts - split_idx;
+    }
+
     const offset_coords: usize = 128;
     const coords_bytes = num_pts * @sizeOf(Point);
     const total_bytes = alignOffset(offset_coords + coords_bytes);
@@ -548,8 +600,8 @@ pub fn parseAirfoilDat(
         .checksum = checksum,
         .param_u32_0 = 16,
         .param_u32_1 = @intCast(num_pts),
-        .param_u32_2 = 0,
-        .param_u32_3 = 0,
+        .param_u32_2 = @intCast(num_upper),
+        .param_u32_3 = @intCast(num_lower),
         .param_u32_4 = 0,
         .param_f64_0 = cl_factor,
         .param_f64_1 = base_cd,

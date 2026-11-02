@@ -549,11 +549,24 @@ fn cmdInspect(path: []const u8, allocator: std.mem.Allocator) !void {
         },
         .airfoil => {
             const num_points = hdr.param_u32_0;
+            const spline_points = hdr.param_u32_1;
+            const num_upper = hdr.param_u32_2;
+            const num_lower = hdr.param_u32_3;
             const cl_factor = hdr.param_f64_0;
             const base_cd = hdr.param_f64_1;
-            std.debug.print("points:       {d}\n", .{num_points});
+            std.debug.print("stations:     {d}\n", .{num_points});
+            std.debug.print("spline_points: {d} ({d} upper, {d} lower)\n", .{ spline_points, num_upper, num_lower });
             std.debug.print("cl_factor:    {d:.4}\n", .{cl_factor});
             std.debug.print("base_cd:      {d:.4}\n", .{base_cd});
+            if (spline_points > 0) {
+                const pts = try inst.getSlice(big_ll.AirfoilDomain.Point, hdr.offset_section_a, @min(spline_points, 4));
+                for (pts, 0..) |p, i| {
+                    std.debug.print("  spline[{d}]: ({d:.6}, {d:.6})\n", .{ i, p.x, p.y });
+                }
+                if (spline_points > 4) {
+                    std.debug.print("  ... ({d} total spline points)\n", .{spline_points});
+                }
+            }
         },
         .telecom => {
             const num_users = hdr.param_u32_0;

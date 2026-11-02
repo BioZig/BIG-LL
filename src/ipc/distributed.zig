@@ -123,6 +123,7 @@ pub const DistributedTransport = struct {
     rank: u32,
     world_size: u32,
     mailbox: NetworkMailbox,
+    last_broadcast_generation: u64 = 0,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -137,6 +138,7 @@ pub const DistributedTransport = struct {
             .rank = rank,
             .world_size = world_size,
             .mailbox = mb,
+            .last_broadcast_generation = 0,
         };
     }
 
@@ -156,7 +158,7 @@ pub const DistributedTransport = struct {
         const count = elites_fitness.len;
         var sent: usize = 0;
 
-        _ = generation;
+        self.last_broadcast_generation = generation;
         for (0..count) |i| {
             const start = i * words_per_chrom;
             const chrom_slice = elites_words[start .. start + words_per_chrom];

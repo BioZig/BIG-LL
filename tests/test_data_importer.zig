@@ -119,7 +119,12 @@ test "Importer: parse UIUC Airfoil .dat spline coordinates into Section A" {
         \\ 0.0000000 0.0000000
         \\ 0.2500000 0.0500000
         \\ 0.5000000 0.0600000
-        \\ 1.0000000 0.0000000
+        \\ 1.0000000 0.0010000
+        \\
+        \\ 0.0000000 0.0000000
+        \\ 0.2500000 -0.0500000
+        \\ 0.5000000 -0.0600000
+        \\ 1.0000000 -0.0010000
     ;
 
     const buf = try importer.parseAirfoilDat(allocator, dat_text, 2.8, 0.0085);
@@ -130,17 +135,30 @@ test "Importer: parse UIUC Airfoil .dat spline coordinates into Section A" {
 
     try std.testing.expectEqual(@as(u32, format.Magic), hdr.magic);
     try std.testing.expectEqual(@as(u32, 5), hdr.domain_tag); // airfoil
-    try std.testing.expectEqual(@as(u32, 16), hdr.param_u32_0);
-    try std.testing.expectEqual(@as(u32, 4), hdr.param_u32_1); // 4 coordinates parsed
+    try std.testing.expectEqual(@as(u32, 16), hdr.param_u32_0); // 16 stations
+    try std.testing.expectEqual(@as(u32, 8), hdr.param_u32_1); // 8 total coordinates
+    try std.testing.expectEqual(@as(u32, 4), hdr.param_u32_2); // 4 upper points
+    try std.testing.expectEqual(@as(u32, 4), hdr.param_u32_3); // 4 lower points
     try std.testing.expectEqual(@as(f64, 2.8), hdr.param_f64_0);
     try std.testing.expectEqual(@as(f64, 0.0085), hdr.param_f64_1);
 
-    const pts = try inst.getSlice(big_ll.data_generator.Point, hdr.offset_section_a, 4);
-    try std.testing.expectEqual(@as(usize, 4), pts.len);
+    const pts = try inst.getSlice(big_ll.data_generator.Point, hdr.offset_section_a, 8);
+    try std.testing.expectEqual(@as(usize, 8), pts.len);
     try std.testing.expectApproxEqAbs(@as(f64, 0.0), pts[0].x, 1e-6);
     try std.testing.expectApproxEqAbs(@as(f64, 0.25), pts[1].x, 1e-6);
     try std.testing.expectApproxEqAbs(@as(f64, 0.05), pts[1].y, 1e-6);
 
     const dom = try big_ll.AirfoilDomain.initFromInstance(&inst);
-    try std.testing.expectEqual(@as(usize, 4), dom.raw_spline_points.?.len);
+    try std.testing.expect(dom.has_baseline);
+    try std.testing.expectEqual(@as(usize, 8), dom.raw_spline_points.?.len);
+
+    // Verify baseline upper and lower interpolation at mid-chord station 0.50 (index 4)
+    try std.testing.expectApproxEqAbs(@as(f64, 0.06), dom.baseline_upper_y[4], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f64, -0.06), dom.baseline_lower_y[4], 1e-4);
+
+    // Verify evaluation evaluates with structural thickness compliance
+    const chrom = big_ll.AirfoilDomain.Chrom.initZero();
+    const geom = dom.decode(&chrom);
+    const fit = dom.evaluate(geom);
+    try std.testing.expect(!std.math.isNan(fit));
 }
