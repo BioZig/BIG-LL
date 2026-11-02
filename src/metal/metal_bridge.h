@@ -54,6 +54,22 @@ bool bigll_metal_eval_finance(
     uint32_t pop_size
 );
 
+// Full In-GPU Generational Evolution Pipeline (Selection + Crossover + Mutation + Evaluation)
+// Runs entirely on Apple Silicon GPU ALUs without CPU round-trips
+bool bigll_metal_evolve_finance(
+    BigLLMetalContext* ctx,
+    uint32_t pop_size,
+    uint32_t num_generations,
+    uint32_t tournament_size,
+    float mutation_rate,
+    const float* expected_returns,
+    const float* cov_matrix,
+    uint32_t num_assets,
+    float risk_aversion,
+    uint32_t seed,
+    float* best_fitness_out
+);
+
 #ifdef __cplusplus
 }
 #endif

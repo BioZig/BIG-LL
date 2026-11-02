@@ -121,4 +121,37 @@ pub const MetalEngine = struct {
             pop_size,
         );
     }
+
+    pub fn evolveFinance(
+        self: *Self,
+        pop_size: u32,
+        num_generations: u32,
+        tournament_size: u32,
+        mutation_rate: f32,
+        expected_returns: []const f32,
+        cov_matrix: []const f32,
+        num_assets: u32,
+        risk_aversion: f32,
+        seed: u32,
+        best_fitness_out: ?*f32,
+    ) bool {
+        if (!is_darwin) return false;
+        const raw_ctx = self.handle orelse return false;
+        if (pop_size == 0 or num_generations == 0) return false;
+        if (expected_returns.len < num_assets or cov_matrix.len < num_assets * num_assets) return false;
+
+        return c.bigll_metal_evolve_finance(
+            @ptrCast(@alignCast(raw_ctx)),
+            pop_size,
+            num_generations,
+            tournament_size,
+            mutation_rate,
+            expected_returns.ptr,
+            cov_matrix.ptr,
+            num_assets,
+            risk_aversion,
+            seed,
+            if (best_fitness_out) |p| p else null,
+        );
+    }
 };

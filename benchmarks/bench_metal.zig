@@ -126,6 +126,45 @@ fn benchFinanceGpuZeroCopy(
     });
 }
 
+fn benchFullGpuEvolution(
+    engine: *MetalEngine,
+    pop_size: u32,
+    generations: u32,
+) !void {
+    var returns: [16]f32 = undefined;
+    var cov: [256]f32 = undefined;
+    for (0..16) |i| {
+        returns[i] = 0.05 + 0.01 * @as(f32, @floatFromInt(i));
+        for (0..16) |j| {
+            cov[i * 16 + j] = if (i == j) 0.04 else 0.005;
+        }
+    }
+
+    var best_fit: f32 = 0.0;
+    // Warmup
+    _ = engine.evolveFinance(pop_size, 5, 3, 0.05, &returns, &cov, 16, 1.0, 12345, &best_fit);
+
+    const t_start = getTimestampNs();
+    _ = engine.evolveFinance(pop_size, generations, 3, 0.05, &returns, &cov, 16, 1.0, 99999, &best_fit);
+    const t_end = getTimestampNs();
+
+    const total_ns = t_end - t_start;
+    const total_evals = @as(usize, pop_size) * @as(usize, generations);
+    const total_sec = @as(f64, @floatFromInt(total_ns)) / 1_000_000_000.0;
+    const evals_per_sec = @as(f64, @floatFromInt(total_evals)) / total_sec;
+    const us_per_gen = (@as(f64, @floatFromInt(total_ns)) / @as(f64, @floatFromInt(generations))) / 1_000.0;
+
+    std.debug.print("benchmark=metal_full_ga domain=finance pop_size={d:<8} gens={d:<4} total_sec={d:.4} us_per_gen={d:>9.2} full_ga_evals_per_sec={d:>12.2} million_evals_sec={d:>8.2} best_fit={d:.4}\n", .{
+        pop_size,
+        generations,
+        total_sec,
+        us_per_gen,
+        evals_per_sec,
+        evals_per_sec / 1_000_000.0,
+        best_fit,
+    });
+}
+
 pub fn main() !void {
     std.debug.print("================================================================================\n", .{});
     std.debug.print("   BIG-LL Dedicated Apple Silicon Metal GPU Acceleration Suite\n", .{});
@@ -181,6 +220,20 @@ pub fn main() !void {
     try benchOneMaxGpuZeroCopy(&engine, 4096, test_pop, test_batches);
     try benchOneMaxGpuZeroCopy(&engine, 8192, test_pop, test_batches);
     try benchOneMaxGpuZeroCopy(&engine, 20480, test_pop, test_batches);
+
+    std.debug.print("\n", .{});
+
+    // -------------------------------------------------------------------------
+    // Suite 4: Full In-GPU Generational GA (Selection + Crossover + Mutation + Eval)
+    // -------------------------------------------------------------------------
+    std.debug.print("--- Suite 4: Full In-GPU GA Pipeline (Selection + Crossover + Mutation + Eval) ---\n", .{});
+    try benchFullGpuEvolution(&engine, 4096, 100);
+    try benchFullGpuEvolution(&engine, 16384, 100);
+    try benchFullGpuEvolution(&engine, 65536, 100);
+    try benchFullGpuEvolution(&engine, 131072, 100);
+    try benchFullGpuEvolution(&engine, 262144, 50);
+    try benchFullGpuEvolution(&engine, 524288, 50);
+    try benchFullGpuEvolution(&engine, 1048576, 25);
 
     std.debug.print("\n================================================================================\n", .{});
     std.debug.print("   Metal GPU Scaled Benchmark Complete\n", .{});

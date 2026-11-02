@@ -77,6 +77,60 @@ static const char* kBigLLMetalShaderSource =
 "        port_var = fma(wi, row_dot, port_var);\n"
 "    }\n"
 "    fitnesses[tid] = port_ret - (0.5f * risk_aversion * port_var);\n"
+"}\n"
+"\n"
+"inline uint lcg_next(thread uint& state) {\n"
+"    state = state * 1664525u + 1013904223u;\n"
+"    return state;\n"
+"}\n"
+"\n"
+"kernel void ga_reproduce_kernel(\n"
+"    device const ulong* current_pop [[buffer(0)]],\n"
+"    device const float* fitnesses [[buffer(1)]],\n"
+"    device ulong* next_pop [[buffer(2)]],\n"
+"    constant uint& pop_size [[buffer(3)]],\n"
+"    constant uint& tournament_size [[buffer(4)]],\n"
+"    constant float& mutation_rate [[buffer(5)]],\n"
+"    constant uint& seed [[buffer(6)]],\n"
+"    uint tid [[thread_position_in_grid]])\n"
+"{\n"
+"    if (tid >= pop_size) return;\n"
+"    uint rng = seed + tid * 2654435761u;\n"
+"    rng = lcg_next(rng);\n"
+"    uint p1_idx = lcg_next(rng) % pop_size;\n"
+"    float best_f1 = fitnesses[p1_idx];\n"
+"    #pragma unroll\n"
+"    for (uint k = 1; k < 4; ++k) {\n"
+"        if (k >= tournament_size) break;\n"
+"        uint cand = lcg_next(rng) % pop_size;\n"
+"        float f = fitnesses[cand];\n"
+"        if (f > best_f1) {\n"
+"            best_f1 = f;\n"
+"            p1_idx = cand;\n"
+"        }\n"
+"    }\n"
+"    uint p2_idx = lcg_next(rng) % pop_size;\n"
+"    float best_f2 = fitnesses[p2_idx];\n"
+"    #pragma unroll\n"
+"    for (uint k = 1; k < 4; ++k) {\n"
+"        if (k >= tournament_size) break;\n"
+"        uint cand = lcg_next(rng) % pop_size;\n"
+"        float f = fitnesses[cand];\n"
+"        if (f > best_f2) {\n"
+"            best_f2 = f;\n"
+"            p2_idx = cand;\n"
+"        }\n"
+"    }\n"
+"    ulong p1 = current_pop[p1_idx];\n"
+"    ulong p2 = current_pop[p2_idx];\n"
+"    ulong mask = ((ulong)lcg_next(rng) << 32) | (ulong)lcg_next(rng);\n"
+"    ulong child = (p1 & mask) | (p2 & ~mask);\n"
+"    uint mut_rand = lcg_next(rng);\n"
+"    if ((float)(mut_rand & 0xFFFF) / 65536.0f < mutation_rate) {\n"
+"        uint bit_to_flip = lcg_next(rng) % 64;\n"
+"        child ^= (1ULL << bit_to_flip);\n"
+"    }\n"
+"    next_pop[tid] = child;\n"
 "}\n";
 
 struct BigLLMetalContext {
@@ -84,9 +138,11 @@ struct BigLLMetalContext {
     id<MTLCommandQueue> command_queue;
     id<MTLComputePipelineState> onemax_pipeline;
     id<MTLComputePipelineState> finance_pipeline;
+    id<MTLComputePipelineState> reproduce_pipeline;
 
     // Persistent zero-copy UMA shared buffers
     id<MTLBuffer> shared_chrom_buf;
+    id<MTLBuffer> shared_chrom_buf_b;
     id<MTLBuffer> shared_fit_buf;
     size_t shared_chrom_capacity_bytes;
     size_t shared_fit_capacity_bytes;
@@ -131,6 +187,13 @@ BigLLMetalContext* bigll_metal_init(void) {
             return NULL;
         }
 
+        id<MTLFunction> repro_fn = [library newFunctionWithName:@"ga_reproduce_kernel"];
+        id<MTLComputePipelineState> repro_pso = [dev newComputePipelineStateWithFunction:repro_fn error:&error];
+        if (!repro_pso) {
+            NSLog(@"[BIG-LL Metal] Failed to create Reproduce pipeline: %@", [error localizedDescription]);
+            return NULL;
+        }
+
         id<MTLCommandQueue> queue = [dev newCommandQueue];
         if (!queue) return NULL;
 
@@ -139,6 +202,7 @@ BigLLMetalContext* bigll_metal_init(void) {
         ctx->command_queue = queue;
         ctx->onemax_pipeline = onemax_pso;
         ctx->finance_pipeline = finance_pso;
+        ctx->reproduce_pipeline = repro_pso;
 
         // Preallocate 8MB shared buffers
         ctx->shared_chrom_capacity_bytes = 131072 * 8 * sizeof(uint64_t); // 8 MB
@@ -146,6 +210,8 @@ BigLLMetalContext* bigll_metal_init(void) {
 
         ctx->shared_chrom_buf = [dev newBufferWithLength:ctx->shared_chrom_capacity_bytes
                                                  options:MTLResourceStorageModeShared];
+        ctx->shared_chrom_buf_b = [dev newBufferWithLength:ctx->shared_chrom_capacity_bytes
+                                                   options:MTLResourceStorageModeShared];
         ctx->shared_fit_buf = [dev newBufferWithLength:ctx->shared_fit_capacity_bytes
                                                options:MTLResourceStorageModeShared];
 
@@ -162,11 +228,13 @@ void bigll_metal_deinit(BigLLMetalContext* ctx) {
     if (!ctx) return;
     @autoreleasepool {
         ctx->shared_chrom_buf = nil;
+        ctx->shared_chrom_buf_b = nil;
         ctx->shared_fit_buf = nil;
         ctx->finance_ret_buf = nil;
         ctx->finance_cov_buf = nil;
         ctx->onemax_pipeline = nil;
         ctx->finance_pipeline = nil;
+        ctx->reproduce_pipeline = nil;
         ctx->command_queue = nil;
         ctx->device = nil;
         free(ctx);
@@ -193,6 +261,8 @@ static void ensure_chrom_buffer(BigLLMetalContext* ctx, size_t required_bytes) {
         ctx->shared_chrom_capacity_bytes = required_bytes * 2;
         ctx->shared_chrom_buf = [ctx->device newBufferWithLength:ctx->shared_chrom_capacity_bytes
                                                          options:MTLResourceStorageModeShared];
+        ctx->shared_chrom_buf_b = [ctx->device newBufferWithLength:ctx->shared_chrom_capacity_bytes
+                                                           options:MTLResourceStorageModeShared];
     }
 }
 
@@ -322,6 +392,113 @@ bool bigll_metal_eval_finance(
 
         if (fitness_out != [ctx->shared_fit_buf contents]) {
             memcpy(fitness_out, [ctx->shared_fit_buf contents], fit_bytes);
+        }
+
+        return true;
+    }
+}
+
+bool bigll_metal_evolve_finance(
+    BigLLMetalContext* ctx,
+    uint32_t pop_size,
+    uint32_t num_generations,
+    uint32_t tournament_size,
+    float mutation_rate,
+    const float* expected_returns,
+    const float* cov_matrix,
+    uint32_t num_assets,
+    float risk_aversion,
+    uint32_t seed,
+    float* best_fitness_out
+) {
+    if (!ctx || pop_size == 0 || num_generations == 0) return false;
+    if (num_assets > 16) return false;
+
+    @autoreleasepool {
+        size_t chrom_bytes = (size_t)pop_size * sizeof(uint64_t);
+        size_t fit_bytes = (size_t)pop_size * sizeof(float);
+
+        ensure_chrom_buffer(ctx, chrom_bytes);
+        ensure_fit_buffer(ctx, fit_bytes);
+
+        memcpy([ctx->finance_ret_buf contents], expected_returns, num_assets * sizeof(float));
+        memcpy([ctx->finance_cov_buf contents], cov_matrix, num_assets * num_assets * sizeof(float));
+
+        id<MTLBuffer> cur_pop = ctx->shared_chrom_buf;
+        id<MTLBuffer> next_pop = ctx->shared_chrom_buf_b;
+
+        MTLSize gridSize = MTLSizeMake(pop_size, 1, 1);
+        NSUInteger threadGroupSize = ctx->finance_pipeline.maxTotalThreadsPerThreadgroup;
+        if (threadGroupSize > 256) threadGroupSize = 256;
+        MTLSize threadgroupSize = MTLSizeMake(threadGroupSize, 1, 1);
+
+        id<MTLCommandBuffer> cmd_buf = [ctx->command_queue commandBuffer];
+
+        // Generation 0 initial evaluation
+        {
+            id<MTLComputeCommandEncoder> encoder = [cmd_buf computeCommandEncoder];
+            [encoder setComputePipelineState:ctx->finance_pipeline];
+            [encoder setBuffer:cur_pop offset:0 atIndex:0];
+            [encoder setBuffer:ctx->shared_fit_buf offset:0 atIndex:1];
+            [encoder setBuffer:ctx->finance_ret_buf offset:0 atIndex:2];
+            [encoder setBuffer:ctx->finance_cov_buf offset:0 atIndex:3];
+            [encoder setBytes:&num_assets length:sizeof(uint32_t) atIndex:4];
+            [encoder setBytes:&risk_aversion length:sizeof(float) atIndex:5];
+            [encoder setBytes:&pop_size length:sizeof(uint32_t) atIndex:6];
+            [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+            [encoder endEncoding];
+        }
+
+        // Generational evolutionary loop entirely on GPU ALUs
+        for (uint32_t g = 1; g < num_generations; ++g) {
+            uint32_t gen_seed = seed + g * 1013904223u;
+
+            // 1. Selection + Crossover + Mutation: cur_pop -> next_pop
+            {
+                id<MTLComputeCommandEncoder> encoder = [cmd_buf computeCommandEncoder];
+                [encoder setComputePipelineState:ctx->reproduce_pipeline];
+                [encoder setBuffer:cur_pop offset:0 atIndex:0];
+                [encoder setBuffer:ctx->shared_fit_buf offset:0 atIndex:1];
+                [encoder setBuffer:next_pop offset:0 atIndex:2];
+                [encoder setBytes:&pop_size length:sizeof(uint32_t) atIndex:3];
+                [encoder setBytes:&tournament_size length:sizeof(uint32_t) atIndex:4];
+                [encoder setBytes:&mutation_rate length:sizeof(float) atIndex:5];
+                [encoder setBytes:&gen_seed length:sizeof(uint32_t) atIndex:6];
+                [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+                [encoder endEncoding];
+            }
+
+            // 2. Evaluation: next_pop -> shared_fit_buf
+            {
+                id<MTLComputeCommandEncoder> encoder = [cmd_buf computeCommandEncoder];
+                [encoder setComputePipelineState:ctx->finance_pipeline];
+                [encoder setBuffer:next_pop offset:0 atIndex:0];
+                [encoder setBuffer:ctx->shared_fit_buf offset:0 atIndex:1];
+                [encoder setBuffer:ctx->finance_ret_buf offset:0 atIndex:2];
+                [encoder setBuffer:ctx->finance_cov_buf offset:0 atIndex:3];
+                [encoder setBytes:&num_assets length:sizeof(uint32_t) atIndex:4];
+                [encoder setBytes:&risk_aversion length:sizeof(float) atIndex:5];
+                [encoder setBytes:&pop_size length:sizeof(uint32_t) atIndex:6];
+                [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+                [encoder endEncoding];
+            }
+
+            // Ping-pong buffer swap
+            id<MTLBuffer> tmp = cur_pop;
+            cur_pop = next_pop;
+            next_pop = tmp;
+        }
+
+        [cmd_buf commit];
+        [cmd_buf waitUntilCompleted];
+
+        if (best_fitness_out) {
+            const float* fits = (const float*)[ctx->shared_fit_buf contents];
+            float max_f = fits[0];
+            for (size_t i = 1; i < pop_size; ++i) {
+                if (fits[i] > max_f) max_f = fits[i];
+            }
+            *best_fitness_out = max_f;
         }
 
         return true;
