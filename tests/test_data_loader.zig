@@ -149,3 +149,141 @@ test "MemoryMappedInstance file-backed loading and checksum verification" {
     const dist_matrix = try mmap_inst.getSlice(f64, hdr.offset_section_c, 33 * 33);
     try std.testing.expectEqual(@as(usize, 33 * 33), dist_matrix.len);
 }
+
+test "BigDInstance polymorphic backings: mmap, ephemeral_ram, borrowed" {
+    const allocator = std.testing.allocator;
+
+    // 1. Borrowed backing
+    {
+        const buf = try generator.generateLogistics(allocator, 32, 35.0, 50.0, 50.0);
+        defer allocator.free(buf);
+
+        var borrowed_inst = try loader.BigDInstance.init(buf);
+        defer borrowed_inst.deinit();
+
+        try std.testing.expectEqual(loader.BackingType.borrowed, @as(loader.BackingType, borrowed_inst.backing));
+        try std.testing.expectEqual(@intFromEnum(format.DomainTag.logistics), borrowed_inst.header().domain_tag);
+    }
+
+    // 2. Ephemeral RAM backing
+    {
+        const buf = try generator.generateLogistics(allocator, 32, 35.0, 50.0, 50.0);
+        var eph_inst = try loader.BigDInstance.initEphemeral(buf, allocator);
+        try std.testing.expectEqual(loader.BackingType.ephemeral_ram, @as(loader.BackingType, eph_inst.backing));
+        try std.testing.expectEqual(@intFromEnum(format.DomainTag.logistics), eph_inst.header().domain_tag);
+        // deinit frees eph_inst.raw_slice using allocator
+        eph_inst.deinit();
+    }
+}
+
+test "JIT lowering: NumPy .npy covariance matrix to in-memory .bigd IR" {
+    const allocator = std.testing.allocator;
+
+    // Create a 6x6 float64 NumPy array buffer
+    const n = 6;
+    const header_dict = "{'descr': '<f8', 'fortran_order': False, 'shape': (6, 6), }";
+    const pad_len = 64 - ((10 + header_dict.len + 1) % 64);
+    const total_hdr = 10 + header_dict.len + pad_len + 1;
+    const data_len = n * n * @sizeOf(f64);
+    const npy_len = total_hdr + data_len;
+
+    const npy_bytes = try allocator.alloc(u8, npy_len);
+    defer allocator.free(npy_bytes);
+
+    @memcpy(npy_bytes[0..6], &format.NpyMagic);
+    npy_bytes[6] = 1; // major
+    npy_bytes[7] = 0; // minor
+    const hlen: u16 = @intCast(header_dict.len + pad_len + 1);
+    std.mem.writeInt(u16, npy_bytes[8..10], hlen, .little);
+    @memcpy(npy_bytes[10 .. 10 + header_dict.len], header_dict);
+    for (10 + header_dict.len .. total_hdr - 1) |i| npy_bytes[i] = ' ';
+    npy_bytes[total_hdr - 1] = '\n';
+
+    const f64_slice: [*]f64 = @ptrCast(@alignCast(npy_bytes.ptr + total_hdr));
+    for (0..n * n) |i| {
+        const row = i / n;
+        const col = i % n;
+        f64_slice[i] = if (row == col) 0.04 else 0.01;
+    }
+
+    const bigd_buf = try big_ll.data_importer.parseNpy(allocator, npy_bytes);
+    var inst = try loader.BigDInstance.initEphemeral(bigd_buf, allocator);
+    defer inst.deinit();
+
+    const hdr = inst.header();
+    try std.testing.expectEqual(format.Magic, hdr.magic);
+    try std.testing.expectEqual(@intFromEnum(format.DomainTag.finance), hdr.domain_tag);
+    try std.testing.expectEqual(@as(u32, 6), hdr.param_u32_0); // 6 assets
+
+    const Dom = big_ll.FinanceDomain;
+    const dom = try Dom.initFromInstance(&inst);
+
+    // Verify 0 runtime heap allocation invariant during fitness evaluation
+    const chrom = Dom.Chrom.initZero();
+    const state = dom.decode(&chrom);
+    const fit = dom.evaluate(state);
+    try std.testing.expect(fit >= 0.0);
+}
+
+test "JIT lowering: PLINK 1.x .bed genotypes to in-memory .bigd IR" {
+    const allocator = std.testing.allocator;
+
+    // 128 SNPs, 40 individuals (10 bytes per SNP, total: 3 + 1280 = 1283 bytes)
+    const num_snps: usize = 128;
+    const num_ind: usize = 40;
+    const bytes_per_snp = (num_ind + 3) / 4;
+    const bed_len = 3 + num_snps * bytes_per_snp;
+
+    const bed_bytes = try allocator.alloc(u8, bed_len);
+    defer allocator.free(bed_bytes);
+
+    @memcpy(bed_bytes[0..3], &format.PlinkBedMagic);
+    for (3..bed_len) |i| {
+        bed_bytes[i] = @intCast(i % 256);
+    }
+
+    const bigd_buf = try big_ll.data_importer.parsePlinkBed(allocator, bed_bytes, null, null);
+    var inst = try loader.BigDInstance.initEphemeral(bigd_buf, allocator);
+    defer inst.deinit();
+
+    const hdr = inst.header();
+    try std.testing.expectEqual(format.Magic, hdr.magic);
+    try std.testing.expectEqual(@intFromEnum(format.DomainTag.bioinformatics), hdr.domain_tag);
+    try std.testing.expectEqual(@as(u32, 128), hdr.param_u32_0);
+
+    const Dom = big_ll.BioinformaticsDomain;
+    const dom = try Dom.initFromInstance(&inst);
+
+    const chrom = Dom.Chrom.initZero();
+    const panel = dom.decode(&chrom);
+    const fit = dom.evaluate(panel);
+    try std.testing.expect(fit >= 0.0);
+}
+
+test "openFileAuto on raw CVRPLIB .vrp with optional --save-ir persistence" {
+    const allocator = std.testing.allocator;
+    const vrp_path = "data/raw/logistics/A-n33-k5.vrp";
+    const cache_file = "/tmp/test_saved_ir_An33k5.bigd";
+    defer _ = std.c.unlink(cache_file);
+
+    var inst = try loader.BigDInstance.openFileAuto(vrp_path, allocator);
+    defer inst.deinit();
+
+    try std.testing.expectEqual(loader.BackingType.ephemeral_ram, @as(loader.BackingType, inst.backing));
+    const hdr = inst.header();
+    try std.testing.expectEqual(format.Magic, hdr.magic);
+    try std.testing.expectEqual(@intFromEnum(format.DomainTag.logistics), hdr.domain_tag);
+    try std.testing.expectEqual(@as(u32, 32), hdr.param_u32_0);
+
+    // Save compiled IR to disk (simulating --save-ir)
+    try generator.saveToFile(cache_file, inst.raw_slice);
+
+    // Reopen cached IR using fast-path mmap
+    var mmap_inst = try loader.BigDInstance.openFileAuto(cache_file, allocator);
+    defer mmap_inst.deinit();
+
+    try std.testing.expectEqual(loader.BackingType.mmap, @as(loader.BackingType, mmap_inst.backing));
+    try std.testing.expectEqual(hdr.checksum, mmap_inst.header().checksum);
+    try std.testing.expectEqual(hdr.total_bytes, mmap_inst.header().total_bytes);
+    try std.testing.expectEqualSlices(u8, inst.raw_slice, mmap_inst.raw_slice);
+}

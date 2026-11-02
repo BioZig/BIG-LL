@@ -34,16 +34,18 @@ fn printUsage() void {
         \\Usage: big-ll <command> [options]
         \\
         \\Commands:
-        \\  solve <file.bigd> [options]    Solve an optimization problem from a .bigd file
+        \\  solve <file> [options]         Execute zero-allocation evolutionary solve on .bigd or raw file
+        \\                                 (Supported formats: .bigd, .npy, .bed, .vrp, .csv, .tsv, .dat)
         \\                                 Options:
         \\                                   --pop <int>       Population size (default: 1024)
         \\                                   --gens <int>      Generations budget (default: 200)
         \\                                   --islands <1|4|8> Core island count (default: 4)
         \\                                   --seed <int>      PRNG seed (default: 42)
         \\                                   --dedup <bool>    Toggle clone filter (default: true)
+        \\                                   --save-ir <path>  Optional: persist compiled in-memory .bigd IR to disk
         \\                                   --json            Output results as JSON
         \\                                   --quiet, -q       Suppress interactive progress
-        \\  inspect <file.bigd>            Memory-map and inspect a .bigd dataset
+        \\  inspect <file>                 Inspect a dataset (supports .bigd, .npy, .bed, .vrp, .csv, etc.)
         \\  generate <domain> <out.bigd>   Generate a synthetic .bigd binary file
         \\                                 Domains: logistics, power_grid, finance,
         \\                                          bioinformatics, airfoil, telecom
@@ -55,8 +57,11 @@ fn printUsage() void {
         \\  help                           Print this command-line manual
         \\
         \\Examples:
-        \\  big-ll solve data/real/logistics/cvrplib_An33k5.bigd --pop 2048 --gens 300
-        \\  big-ll solve data/real/finance/sp500_portfolio.bigd --islands 4 --json
+        \\  big-ll solve data/raw/logistics/A-n33-k5.vrp --pop 2048 --gens 300
+        \\  big-ll solve data/raw/power_grid/ieee_rts96_thermal.csv --islands 4
+        \\  big-ll solve data/raw/logistics/A-n33-k5.vrp --save-ir /tmp/cached_An33k5.bigd
+        \\  big-ll solve /tmp/cached_An33k5.bigd
+        \\  big-ll solve data/real/finance/sp500_portfolio.bigd --json
         \\  big-ll inspect data/real/power_grid/ieee_rts96.bigd
         \\  big-ll demo
         \\
@@ -71,6 +76,7 @@ pub const SolveOptions = struct {
     enable_dedup: bool = true,
     json: bool = false,
     quiet: bool = false,
+    save_ir: ?[]const u8 = null,
 };
 
 fn runSingle(
@@ -253,11 +259,23 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
     const file_path_z = try allocator.dupeZ(u8, file_path);
     defer allocator.free(file_path_z);
 
-    var inst = big_ll.MemoryMappedInstance.openFile(file_path_z) catch |err| {
+    var inst = big_ll.BigDInstance.openFileAuto(file_path_z, allocator) catch |err| {
         std.debug.print("error: failed to open '{s}': {s}\n", .{ file_path, @errorName(err) });
         return;
     };
     defer inst.deinit();
+
+    if (options.save_ir) |save_path| {
+        const save_path_z = try allocator.dupeZ(u8, save_path);
+        defer allocator.free(save_path_z);
+        big_ll.data_generator.saveToFile(save_path_z, inst.raw_slice) catch |err| {
+            std.debug.print("error: failed to save compiled IR to '{s}': {s}\n", .{ save_path, @errorName(err) });
+            return;
+        };
+        if (!options.quiet and !options.json) {
+            std.debug.print("Compiled IR saved to: {s} ({d} bytes)\n", .{ save_path, inst.raw_slice.len });
+        }
+    }
 
     const hdr = inst.header();
     const domain_tag: big_ll.DomainTag = @enumFromInt(hdr.domain_tag);
@@ -305,12 +323,47 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
             }
         },
         .finance => {
-            const dom = try big_ll.FinanceDomain.initFromInstance(&inst);
-            try executeSolve(big_ll.FinanceDomain.CHROM_LEN, big_ll.FinanceDomain, dom, "finance", file_path, options, allocator);
+            switch (hdr.param_u32_0) {
+                6 => {
+                    const Dom = big_ll.ParameterizedFinanceDomain(6, 8, 16);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
+                },
+                16 => {
+                    const Dom = big_ll.ParameterizedFinanceDomain(16, 8, 16);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
+                },
+                else => {
+                    const Dom = big_ll.FinanceDomain;
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
+                },
+            }
         },
         .bioinformatics => {
-            const dom = try big_ll.BioinformaticsDomain.initFromInstance(&inst);
-            try executeSolve(big_ll.BioinformaticsDomain.CHROM_LEN, big_ll.BioinformaticsDomain, dom, "bioinformatics", file_path, options, allocator);
+            switch (hdr.param_u32_0) {
+                64 => {
+                    const Dom = big_ll.ParameterizedBioinformaticsDomain(64);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+                },
+                128 => {
+                    const Dom = big_ll.ParameterizedBioinformaticsDomain(128);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+                },
+                256 => {
+                    const Dom = big_ll.ParameterizedBioinformaticsDomain(256);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+                },
+                else => {
+                    const Dom = big_ll.BioinformaticsDomain;
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+                },
+            }
         },
         .airfoil => {
             const dom = try big_ll.AirfoilDomain.initFromInstance(&inst);
@@ -327,7 +380,7 @@ fn cmdInspect(path: []const u8, allocator: std.mem.Allocator) !void {
     const path_z = try allocator.dupeZ(u8, path);
     defer allocator.free(path_z);
 
-    var inst = big_ll.MemoryMappedInstance.openFile(path_z) catch |err| {
+    var inst = big_ll.BigDInstance.openFileAuto(path_z, allocator) catch |err| {
         std.debug.print("error: failed to open '{s}': {s}\n", .{ path, @errorName(err) });
         return;
     };
@@ -637,6 +690,12 @@ pub fn main(init: std.process.Init) !void {
                     return;
                 };
                 options.enable_dedup = std.mem.eql(u8, val_str, "true") or std.mem.eql(u8, val_str, "1");
+            } else if (std.mem.eql(u8, arg, "--save-ir")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --save-ir requires an output file path\n", .{});
+                    return;
+                };
+                options.save_ir = val_str;
             } else if (std.mem.eql(u8, arg, "--json")) {
                 options.json = true;
             } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {

@@ -74,6 +74,7 @@ pub const createEngine = c_api.createEngine;
 
 pub const BigDHeader = data_format.BigDHeader;
 pub const DomainTag = data_format.DomainTag;
+pub const BigDInstance = data_loader.BigDInstance;
 pub const MemoryMappedInstance = data_loader.MemoryMappedInstance;
 pub const StaticBufferInstance = data_loader.StaticBufferInstance;
 

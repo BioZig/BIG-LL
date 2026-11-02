@@ -3,6 +3,9 @@ const std = @import("std");
 pub const Magic: u32 = 0x42494744; // "BIGD"
 pub const CurrentVersion: u32 = 1;
 
+pub const NpyMagic: [6]u8 = [_]u8{ 0x93, 'N', 'U', 'M', 'P', 'Y' };
+pub const PlinkBedMagic: [3]u8 = [_]u8{ 0x6C, 0x1B, 0x01 };
+
 pub const DomainTag = enum(u32) {
     logistics = 1,
     power_grid = 2,
