@@ -113,6 +113,52 @@ pub fn ParameterizedBioinformaticsDomain(comptime num_snps: usize) type {
             const penalty = Decoder.evaluateCardinalityPenalty(panel.count, self.max_card, self.card_penalty_weight);
             return (100.0 + score) / (1.0 + penalty);
         }
+
+        /// Direct bitboard evaluation bypassing intermediate index array decoding.
+        /// Evaluates active SNP main effects and pairwise epistasis directly on the bitboard words.
+        pub fn evaluateDirect(self: *const @This(), chrom: *const Chrom) f64 {
+            const active_count = chrom.popCount();
+            if (active_count == 0) return 0.0;
+
+            var score: f64 = 0.0;
+            const words = &chrom.words;
+
+            if (self.main_effects) |me| {
+                for (0..NUM_SNPS) |idx| {
+                    const w_idx = idx / 64;
+                    const b_idx: u6 = @intCast(idx % 64);
+                    if ((words[w_idx] & (@as(u64, 1) << b_idx)) != 0) {
+                        score += me[idx];
+                    }
+                }
+            } else {
+                for (0..NUM_SNPS) |idx| {
+                    const w_idx = idx / 64;
+                    const b_idx: u6 = @intCast(idx % 64);
+                    if ((words[w_idx] & (@as(u64, 1) << b_idx)) != 0) {
+                        const f_idx: f64 = @floatFromInt(idx);
+                        score += 0.2 + 0.1 * @sin(f_idx * 0.3);
+                    }
+                }
+            }
+
+            if (self.pairs) |p_slice| {
+                for (p_slice) |p| {
+                    if (p.idx1 < NUM_SNPS and p.idx2 < NUM_SNPS) {
+                        const w1 = p.idx1 / 64;
+                        const b1: u6 = @intCast(p.idx1 % 64);
+                        const w2 = p.idx2 / 64;
+                        const b2: u6 = @intCast(p.idx2 % 64);
+                        if ((words[w1] & (@as(u64, 1) << b1)) != 0 and (words[w2] & (@as(u64, 1) << b2)) != 0) {
+                            score += p.weight;
+                        }
+                    }
+                }
+            }
+
+            const penalty = Decoder.evaluateCardinalityPenalty(active_count, self.max_card, self.card_penalty_weight);
+            return (100.0 + score) / (1.0 + penalty);
+        }
     };
 }
 

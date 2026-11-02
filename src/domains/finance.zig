@@ -106,9 +106,12 @@ pub fn ParameterizedFinanceDomain(comptime num_assets: usize, comptime num_rules
             var port_var: f64 = 0.0;
             for (0..NUM_ASSETS) |i| {
                 const w_i = norm_w[i];
+                if (w_i <= 1e-6) continue;
                 var row_sum: f64 = 0.0;
                 for (0..NUM_ASSETS) |j| {
-                    row_sum += norm_w[j] * self.cov_matrix[i][j];
+                    if (norm_w[j] > 1e-6) {
+                        row_sum += norm_w[j] * self.cov_matrix[i][j];
+                    }
                 }
                 port_var += w_i * row_sum;
             }

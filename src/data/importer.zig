@@ -502,10 +502,41 @@ pub fn parseAirfoilDat(
     cl_factor: f64,
     base_cd: f64,
 ) ![]align(64) u8 {
-    _ = dat_text;
-    const total_bytes: usize = 128;
+    var pts: std.ArrayList(Point) = .empty;
+    defer pts.deinit(allocator);
+
+    var lines = std.mem.splitScalar(u8, dat_text, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \r\t");
+        if (line.len == 0 or line[0] == '#') continue;
+
+        var it = std.mem.tokenizeAny(u8, line, " \t,");
+        const x_str = it.next() orelse continue;
+        const y_str = it.next() orelse continue;
+
+        const x = std.fmt.parseFloat(f64, x_str) catch continue;
+        const y = std.fmt.parseFloat(f64, y_str) catch continue;
+
+        // Filter out header row (e.g. "66. 66."): airfoil spline coordinates are normalized in [-0.2, 1.2]
+        if (x >= -0.2 and x <= 1.2 and y >= -1.0 and y <= 1.0) {
+            try pts.append(allocator, .{ .x = x, .y = y });
+        }
+    }
+
+    const num_pts = pts.items.len;
+    const offset_coords: usize = 128;
+    const coords_bytes = num_pts * @sizeOf(Point);
+    const total_bytes = alignOffset(offset_coords + coords_bytes);
+
     const buffer = try allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(64), total_bytes);
     @memset(buffer, 0);
+
+    if (num_pts > 0) {
+        const coords_slice: [*]Point = @ptrCast(@alignCast(buffer.ptr + offset_coords));
+        @memcpy(coords_slice[0..num_pts], pts.items);
+    }
+
+    const checksum = if (num_pts > 0) format.computeChecksum(buffer[128..total_bytes]) else 0;
 
     const hdr: *BigDHeader = @ptrCast(buffer.ptr);
     hdr.* = .{
@@ -514,17 +545,17 @@ pub fn parseAirfoilDat(
         .domain_tag = @intFromEnum(DomainTag.airfoil),
         .flags = 0,
         .total_bytes = @intCast(total_bytes),
-        .checksum = 0,
-        .param_u32_4 = 0,
+        .checksum = checksum,
         .param_u32_0 = 16,
-        .param_u32_1 = 0,
+        .param_u32_1 = @intCast(num_pts),
         .param_u32_2 = 0,
         .param_u32_3 = 0,
+        .param_u32_4 = 0,
         .param_f64_0 = cl_factor,
         .param_f64_1 = base_cd,
         .param_f64_2 = 50.0,
         .param_f64_3 = 0.05,
-        .offset_section_a = 128,
+        .offset_section_a = offset_coords,
         .offset_section_b = 0,
         .offset_section_c = 0,
         .reserved = [_]u64{0} ** 3,

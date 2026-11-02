@@ -9,6 +9,7 @@ pub const pool = @import("core/pool.zig");
 pub const pareto = @import("core/pareto.zig");
 pub const shm = @import("ipc/shm.zig");
 pub const c_api = @import("ipc/c_api.zig");
+pub const distributed = @import("ipc/distributed.zig");
 pub const data_format = @import("data/format.zig");
 pub const data_loader = @import("data/loader.zig");
 pub const data_generator = @import("data/generator.zig");
@@ -77,6 +78,16 @@ pub const DomainTag = data_format.DomainTag;
 pub const BigDInstance = data_loader.BigDInstance;
 pub const MemoryMappedInstance = data_loader.MemoryMappedInstance;
 pub const StaticBufferInstance = data_loader.StaticBufferInstance;
+
+pub const BlockChromosome = types.BlockChromosome;
+pub const BITS_PER_BLOCK = types.BITS_PER_BLOCK;
+pub const WORDS_PER_BLOCK = types.WORDS_PER_BLOCK;
+pub const BYTES_PER_BLOCK = types.BYTES_PER_BLOCK;
+
+pub const DistributedTransport = distributed.DistributedTransport;
+pub const TransportType = distributed.TransportType;
+pub const FrameHeader = distributed.FrameHeader;
+pub const NetworkMailbox = distributed.NetworkMailbox;
 
 // Apple Silicon Dedicated Metal GPU Batch Acceleration
 pub const metal = @import("metal/metal_engine.zig");

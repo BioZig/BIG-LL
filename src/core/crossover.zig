@@ -240,10 +240,14 @@ pub const DynamicCrossoverEngine = struct {
     }
 
     pub inline fn cleanMaskPadding(mask: []u64, bit_length: usize) void {
+        const active_words = (bit_length + 63) / 64;
         const remainder = bit_length % 64;
-        if (remainder != 0 and mask.len > 0) {
+        if (remainder != 0 and active_words > 0 and active_words <= mask.len) {
             const pad_mask = (@as(u64, 1) << @intCast(remainder)) - 1;
-            mask[mask.len - 1] &= pad_mask;
+            mask[active_words - 1] &= pad_mask;
+        }
+        for (active_words..mask.len) |w| {
+            mask[w] = 0;
         }
     }
 };

@@ -43,6 +43,11 @@ fn printUsage() void {
         \\                                   --seed <int>      PRNG seed (default: 42)
         \\                                   --dedup <bool>    Toggle clone filter (default: true)
         \\                                   --save-ir <path>  Optional: persist compiled in-memory .bigd IR to disk
+        \\                                   --cluster         Enable distributed multi-node CPU clustering
+        \\                                   --transport <t>   Transport backend: mpi, rdma, mesh, shm (default: shm)
+        \\                                   --node-id <int>   Cluster rank ID (default: 0)
+        \\                                   --num-nodes <int> Total cluster node count (default: 1)
+        \\                                   --peer <addr>     Peer node endpoint (for point-to-point mesh)
         \\                                   --json            Output results as JSON
         \\                                   --quiet, -q       Suppress interactive progress
         \\  inspect <file>                 Inspect a dataset (supports .bigd, .npy, .bed, .vrp, .csv, etc.)
@@ -77,6 +82,11 @@ pub const SolveOptions = struct {
     json: bool = false,
     quiet: bool = false,
     save_ir: ?[]const u8 = null,
+    enable_cluster: bool = false,
+    transport: big_ll.TransportType = .shm,
+    node_id: u32 = 0,
+    num_nodes: u32 = 1,
+    peer_endpoint: ?[]const u8 = null,
 };
 
 fn runSingle(
@@ -280,9 +290,18 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
     const hdr = inst.header();
     const domain_tag: big_ll.DomainTag = @enumFromInt(hdr.domain_tag);
 
+    if (options.enable_cluster and !options.quiet and !options.json) {
+        std.debug.print("Cluster node {d}/{d} active (transport: {s})\n", .{ options.node_id, options.num_nodes, @tagName(options.transport) });
+    }
+
     switch (domain_tag) {
         .logistics => {
             switch (hdr.param_u32_0) {
+                16 => {
+                    const Dom = big_ll.ParameterizedLogisticsDomain(16, 16);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
+                },
                 31 => {
                     const Dom = big_ll.ParameterizedLogisticsDomain(31, 16);
                     const dom = try Dom.initFromInstance(&inst);
@@ -299,7 +318,7 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
                     try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
                 },
                 else => {
-                    std.debug.print("error: unsupported customer count {d} for logistics domain. Supported: 31, 32, 64.\n", .{hdr.param_u32_0});
+                    std.debug.print("error: unsupported customer count {d} for logistics domain. Supported: 16, 31, 32, 64.\n", .{hdr.param_u32_0});
                     return error.UnsupportedCustomerCount;
                 },
             }
@@ -311,13 +330,23 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
                     const dom = try Dom.initFromInstance(&inst);
                     try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
                 },
+                16 => {
+                    const Dom = big_ll.ParameterizedPowerGridDomain(16, 16, 300.0);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
+                },
                 32 => {
                     const Dom = big_ll.ParameterizedPowerGridDomain(32, 16, 450.0);
                     const dom = try Dom.initFromInstance(&inst);
                     try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
                 },
+                64 => {
+                    const Dom = big_ll.ParameterizedPowerGridDomain(64, 16, 900.0);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
+                },
                 else => {
-                    std.debug.print("error: unsupported generator count {d} for power grid domain. Supported: 8, 32.\n", .{hdr.param_u32_0});
+                    std.debug.print("error: unsupported generator count {d} for power grid domain. Supported: 8, 16, 32, 64.\n", .{hdr.param_u32_0});
                     return error.UnsupportedGeneratorCount;
                 },
             }
@@ -331,6 +360,16 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
                 },
                 16 => {
                     const Dom = big_ll.ParameterizedFinanceDomain(16, 8, 16);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
+                },
+                32 => {
+                    const Dom = big_ll.ParameterizedFinanceDomain(32, 8, 16);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
+                },
+                64 => {
+                    const Dom = big_ll.ParameterizedFinanceDomain(64, 8, 16);
                     const dom = try Dom.initFromInstance(&inst);
                     try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
                 },
@@ -358,6 +397,21 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
                     const dom = try Dom.initFromInstance(&inst);
                     try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
                 },
+                512 => {
+                    const Dom = big_ll.ParameterizedBioinformaticsDomain(512);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+                },
+                1024 => {
+                    const Dom = big_ll.ParameterizedBioinformaticsDomain(1024);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+                },
+                20480 => {
+                    const Dom = big_ll.ParameterizedBioinformaticsDomain(20480);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+                },
                 else => {
                     const Dom = big_ll.BioinformaticsDomain;
                     const dom = try Dom.initFromInstance(&inst);
@@ -370,8 +424,27 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
             try executeSolve(big_ll.AirfoilDomain.CHROM_LEN, big_ll.AirfoilDomain, dom, "airfoil", file_path, options, allocator);
         },
         .telecom => {
-            const dom = try big_ll.TelecomDomain.initFromInstance(&inst);
-            try executeSolve(big_ll.TelecomDomain.CHROM_LEN, big_ll.TelecomDomain, dom, "telecom", file_path, options, allocator);
+            switch (hdr.param_u32_0) {
+                8 => {
+                    const Dom = big_ll.ParameterizedTelecomDomain(8, 4, 2, 4);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "telecom", file_path, options, allocator);
+                },
+                16 => {
+                    const Dom = big_ll.ParameterizedTelecomDomain(16, 4, 2, 4);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "telecom", file_path, options, allocator);
+                },
+                32 => {
+                    const Dom = big_ll.ParameterizedTelecomDomain(32, 4, 2, 4);
+                    const dom = try Dom.initFromInstance(&inst);
+                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "telecom", file_path, options, allocator);
+                },
+                else => {
+                    const dom = try big_ll.TelecomDomain.initFromInstance(&inst);
+                    try executeSolve(big_ll.TelecomDomain.CHROM_LEN, big_ll.TelecomDomain, dom, "telecom", file_path, options, allocator);
+                },
+            }
         },
     }
 }
@@ -696,6 +769,49 @@ pub fn main(init: std.process.Init) !void {
                     return;
                 };
                 options.save_ir = val_str;
+            } else if (std.mem.eql(u8, arg, "--cluster")) {
+                options.enable_cluster = true;
+            } else if (std.mem.eql(u8, arg, "--transport")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --transport requires 'mpi', 'rdma', 'mesh', or 'shm'\n", .{});
+                    return;
+                };
+                if (std.mem.eql(u8, val_str, "mpi")) {
+                    options.transport = .mpi;
+                } else if (std.mem.eql(u8, val_str, "rdma")) {
+                    options.transport = .rdma;
+                } else if (std.mem.eql(u8, val_str, "mesh")) {
+                    options.transport = .mesh;
+                } else if (std.mem.eql(u8, val_str, "shm")) {
+                    options.transport = .shm;
+                } else {
+                    std.debug.print("error: invalid transport '{s}'. supported: mpi, rdma, mesh, shm\n", .{val_str});
+                    return;
+                }
+            } else if (std.mem.eql(u8, arg, "--node-id")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --node-id requires an integer rank argument\n", .{});
+                    return;
+                };
+                options.node_id = std.fmt.parseInt(u32, val_str, 10) catch {
+                    std.debug.print("error: invalid integer for --node-id: '{s}'\n", .{val_str});
+                    return;
+                };
+            } else if (std.mem.eql(u8, arg, "--num-nodes")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --num-nodes requires an integer argument\n", .{});
+                    return;
+                };
+                options.num_nodes = std.fmt.parseInt(u32, val_str, 10) catch {
+                    std.debug.print("error: invalid integer for --num-nodes: '{s}'\n", .{val_str});
+                    return;
+                };
+            } else if (std.mem.eql(u8, arg, "--peer")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --peer requires an endpoint string\n", .{});
+                    return;
+                };
+                options.peer_endpoint = val_str;
             } else if (std.mem.eql(u8, arg, "--json")) {
                 options.json = true;
             } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {

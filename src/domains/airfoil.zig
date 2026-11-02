@@ -14,8 +14,14 @@ pub const AirfoilDomain = struct {
         lower_y: [8]f64,
     };
 
+    pub const Point = struct {
+        x: f64,
+        y: f64,
+    };
+
     cl_factor: f64 = 2.5,
     base_cd: f64 = 0.01,
+    raw_spline_points: ?[]const Point = null,
 
     comptime {
         std.debug.assert(CHROM_LEN == 256);
@@ -36,9 +42,15 @@ pub const AirfoilDomain = struct {
         if (hdr.domain_tag != @intFromEnum(format.DomainTag.airfoil)) return error.DomainMismatch;
         if (hdr.param_u32_0 != NUM_POINTS) return error.PointCountMismatch;
 
+        const raw_pts = if (hdr.param_u32_1 > 0)
+            try inst.getSlice(Point, hdr.offset_section_a, hdr.param_u32_1)
+        else
+            null;
+
         return AirfoilDomain{
             .cl_factor = hdr.param_f64_0,
             .base_cd = hdr.param_f64_1,
+            .raw_spline_points = raw_pts,
         };
     }
 

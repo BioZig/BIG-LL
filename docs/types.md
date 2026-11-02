@@ -80,3 +80,28 @@ Structure-of-Arrays (SoA) contiguous memory container eliminating cache line was
   * `getWords(idx)`, `getWordsMut(idx)`: Direct strided slice access.
   * `updateMetrics()`: $O(N)$ arithmetic mean and maximum fitness extraction.
   * `computeShannonEntropy()`: Parallelized bitwise population Shannon entropy across arbitrary $L$.
+
+---
+
+### BlockChromosome(comptime num_blocks: usize)
+
+High-dimensional, contiguous 512-bit cacheline block architecture for scaling up to 20,480+ bits with full L2/SLC cache residency.
+
+* **Memory Architecture:**
+  * Fixed block size: `BITS_PER_BLOCK = 512` bits, `WORDS_PER_BLOCK = 8` words (`u64`), `BYTES_PER_BLOCK = 64` bytes.
+  * `blocks: [num_blocks][WORDS_PER_BLOCK]u64 align(64)`: Every 512-bit block is aligned to a physical 64-byte L1D cacheline boundary.
+  * Total Bit Capacity: $\text{Capacity} = \text{num\_blocks} \times 512$ bits.
+  * Scalar Metrics: `fitness: f64` and `hash: u64`.
+
+* **Cache Residency at 20,480 Bits:**
+  * For 20,480 bits ($\text{num\_blocks} = 40$):
+    $$\text{Size per Individual} = 40 \times 64\text{ bytes} = 2,560\text{ bytes} \approx 2.5\text{ KB}.$$
+  * For an entire island population of $N = 1,024$ individuals:
+    $$\text{Island Population Footprint} = 1,024 \times 2,560\text{ bytes} = 2,621,440\text{ bytes} \approx 2.56\text{ MB}.$$
+  * Because $2.56\text{ MB} \ll 16\text{--}48\text{ MB}$, the **entire 20,480-bit population fits 100% inside CPU L2/SLC cache**, eliminating DRAM round-trip latency.
+
+* **Operations:**
+  * `getBit(idx)`, `setBit(idx, val)`, `toggleBit(idx)`: $O(1)$ block-indexed bit manipulation.
+  * `popCount()`: Vectorized `@popCount` accumulated across cacheline blocks.
+  * `crossover(other, mask, c1, c2)`: Parallel logic multiplexing recombination across 512-bit cacheline blocks.
+  * `cleanPadding(active_bits)`: Strict invariant enforcement zeroing trailing bits in partial blocks.

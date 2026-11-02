@@ -312,13 +312,13 @@ pub fn DynamicGeneticEngine(comptime Adapter: type) type {
             const e_k: usize = if (bit_len <= 1024) 64 else if (bit_len <= 8192) 128 else 256;
             std.debug.assert(pop_size >= e_k);
 
-            const w_len = (bit_len + 63) / 64;
-
             var pop_cur = try types.DynamicPopulation.init(allocator, pop_size, bit_len);
             errdefer pop_cur.deinit(allocator);
 
             var pop_nxt = try types.DynamicPopulation.init(allocator, pop_size, bit_len);
             errdefer pop_nxt.deinit(allocator);
+
+            const w_len = pop_cur.pitch;
 
             var link_eng = try linkage.DynamicLinkageEngine.init(allocator, bit_len);
             errdefer link_eng.deinit(allocator);

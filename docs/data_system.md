@@ -131,3 +131,38 @@ The binary dataset system is verified by two test suites in the continuous integ
      * Bioinformatics: Extracted biomarker panel strictly within cardinality bounds.
      * Airfoil: Physical thickness non-negative ($y_{\text{upper}} \ge y_{\text{lower}}$).
      * Telecom: Valid channel assignments and power bounds.
+
+---
+
+## 7. Multi-Format Ephemeral Ingestion & Zero-Disk JIT Lowering
+
+To decouple solver mechanics from raw domain formats without compromising cache alignment or introducing disk clutter, BIG-LL implements a unified JIT lowering pipeline:
+
+```
+                            big-ll solve <input_file>
+                                       │
+                          Inspect First 16 Bytes / Magic
+                                       │
+             ┌─────────────────────────┼─────────────────────────┐
+             ▼                         ▼                         ▼
+     Magic == 0x42494744      Magic == 0x6C 0x1B 0x01      Magic == "\x93NUMPY"
+         [ .bigd ]                 [ PLINK .bed ]              [ NumPy .npy ]
+             │                         │                         │
+       POSIX mmap()              JIT Lowering               JIT Lowering
+    (Fast-path: ~1.8 µs)    (Stream into RAM buffer)   (Header parse + RAM buffer)
+             │                         │                         │
+             └─────────────────────────┼─────────────────────────┘
+                                       ▼
+                            Unified BigDInstance
+                       (raw_slice: []align(64) const u8)
+                                       │
+                                       ▼
+                        Zero-Allocation Solver Engine
+                        (4-Island CPU / Metal GPU UMA)
+```
+
+### Architectural Properties:
+1. **`UnifiedBigDInstance`**: Polymorphic container representing either a POSIX `mmap` backing slice or an ephemeral anonymous RAM buffer (`ephemeral_ram`).
+2. **Zero Disk Footprint**: Raw files (`.bed`, `.npy`, `.vrp`, `.csv`, `.tsv`, `.dat`) are compiled into a 64-byte aligned in-memory `.bigd` buffer in RAM during initialization. No files are written to `/tmp` or disk.
+3. **Preservation of the 0 B Runtime Heap Invariant**: JIT translation happens strictly during initialization. Once the evolutionary loop begins, the engine operates on the RAM buffer with zero heap allocations.
+4. **`--save-ir <path>` Support**: Enables optional persistence of compiled in-memory IR to disk for recurring microsecond-level fast-path runs.

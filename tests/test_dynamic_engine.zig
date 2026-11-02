@@ -10,25 +10,25 @@ const DynamicGeneticEngine = big_ll.DynamicGeneticEngine;
 test "DynamicPopulation pitch and 64-byte alignment" {
     const allocator = std.testing.allocator;
 
-    // Test small L = 64 (pitch = 1 word = 8 bytes)
+    // Test small L = 64 (pitch = 8 words = 64 bytes for L1D cacheline alignment)
     var pop64 = try DynamicPopulation.init(allocator, 1024, 64);
     defer pop64.deinit(allocator);
 
-    try std.testing.expectEqual(@as(usize, 1), pop64.pitch);
+    try std.testing.expectEqual(@as(usize, 8), pop64.pitch);
     try std.testing.expectEqual(@as(usize, 1024), pop64.pop_size);
     try std.testing.expectEqual(@as(usize, 64), pop64.bit_length);
-    try std.testing.expectEqual(@as(usize, 1024), pop64.bitboard.len);
+    try std.testing.expectEqual(@as(usize, 1024 * 8), pop64.bitboard.len);
 
     // Verify 64-byte alignment
     const addr = @intFromPtr(pop64.bitboard.ptr);
     try std.testing.expectEqual(@as(usize, 0), addr % 64);
 
-    // Test irregular L = 350 (pitch = (350+63)/64 = 6 words)
+    // Test irregular L = 350 (raw words = (350+63)/64 = 6 words, pitch aligned to 8 words = 64 bytes)
     var pop350 = try DynamicPopulation.init(allocator, 128, 350);
     defer pop350.deinit(allocator);
 
-    try std.testing.expectEqual(@as(usize, 6), pop350.pitch);
-    try std.testing.expectEqual(@as(usize, 128 * 6), pop350.bitboard.len);
+    try std.testing.expectEqual(@as(usize, 8), pop350.pitch);
+    try std.testing.expectEqual(@as(usize, 128 * 8), pop350.bitboard.len);
 }
 
 test "DynamicChromosome bit manipulation and operations" {

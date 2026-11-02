@@ -82,6 +82,141 @@ pub fn Chromosome(comptime L: usize) type {
     };
 }
 
+pub const BITS_PER_BLOCK: usize = 512;
+pub const WORDS_PER_BLOCK: usize = 8; // 8 * 64 = 512 bits = 64 bytes = 1 L1D cacheline
+pub const BYTES_PER_BLOCK: usize = 64;
+
+/// Cacheline-tiled block chromosome designed for ultra-large dimensions (e.g. 20,480+ bits).
+/// Each block is exactly 64 bytes (1 L1D cacheline) and 64-byte aligned.
+/// Vectorized inner loops execute across 512-bit boundaries with 0 heap overhead.
+pub fn BlockChromosome(comptime num_blocks: usize) type {
+    comptime {
+        std.debug.assert(num_blocks > 0);
+    }
+    const total_words = num_blocks * WORDS_PER_BLOCK;
+    const total_bits = num_blocks * BITS_PER_BLOCK;
+
+    return struct {
+        const Self = @This();
+        pub const block_count: usize = num_blocks;
+        pub const word_count: usize = total_words;
+        pub const bit_length: usize = total_bits;
+
+        // Exactly num_blocks L1D cachelines (64 bytes each), aligned to 64 bytes
+        blocks: [num_blocks][WORDS_PER_BLOCK]u64 align(64),
+        fitness: f64,
+        hash: u64,
+
+        pub fn initZero() Self {
+            return .{
+                .blocks = [_][WORDS_PER_BLOCK]u64{[_]u64{0} ** WORDS_PER_BLOCK} ** num_blocks,
+                .fitness = -std.math.inf(f64),
+                .hash = 0,
+            };
+        }
+
+        pub inline fn getBit(self: *const Self, idx: usize) u1 {
+            std.debug.assert(idx < total_bits);
+            const blk = idx / BITS_PER_BLOCK;
+            const rem = idx % BITS_PER_BLOCK;
+            const w_idx = rem / 64;
+            const b_idx: u6 = @intCast(rem % 64);
+            return @truncate((self.blocks[blk][w_idx] >> b_idx) & 1);
+        }
+
+        pub inline fn setBit(self: *Self, idx: usize, val: u1) void {
+            std.debug.assert(idx < total_bits);
+            const blk = idx / BITS_PER_BLOCK;
+            const rem = idx % BITS_PER_BLOCK;
+            const w_idx = rem / 64;
+            const b_idx: u6 = @intCast(rem % 64);
+            const mask = @as(u64, 1) << b_idx;
+            if (val == 1) {
+                self.blocks[blk][w_idx] |= mask;
+            } else {
+                self.blocks[blk][w_idx] &= ~mask;
+            }
+        }
+
+        pub inline fn toggleBit(self: *Self, idx: usize) void {
+            std.debug.assert(idx < total_bits);
+            const blk = idx / BITS_PER_BLOCK;
+            const rem = idx % BITS_PER_BLOCK;
+            const w_idx = rem / 64;
+            const b_idx: u6 = @intCast(rem % 64);
+            self.blocks[blk][w_idx] ^= (@as(u64, 1) << b_idx);
+        }
+
+        pub fn popCount(self: *const Self) usize {
+            var sum: usize = 0;
+            inline for (0..num_blocks) |blk| {
+                inline for (0..WORDS_PER_BLOCK) |w| {
+                    sum += @popCount(self.blocks[blk][w]);
+                }
+            }
+            return sum;
+        }
+
+        pub fn hammingDistance(self: *const Self, other: *const Self) usize {
+            var dist: usize = 0;
+            inline for (0..num_blocks) |blk| {
+                inline for (0..WORDS_PER_BLOCK) |w| {
+                    dist += @popCount(self.blocks[blk][w] ^ other.blocks[blk][w]);
+                }
+            }
+            return dist;
+        }
+
+        pub fn bitwiseEqual(self: *const Self, other: *const Self) bool {
+            inline for (0..num_blocks) |blk| {
+                inline for (0..WORDS_PER_BLOCK) |w| {
+                    if (self.blocks[blk][w] != other.blocks[blk][w]) return false;
+                }
+            }
+            return true;
+        }
+
+        pub inline fn crossoverBlock(
+            self: *Self,
+            p1: *const Self,
+            p2: *const Self,
+            mask: [WORDS_PER_BLOCK]u64,
+            blk_idx: usize,
+        ) void {
+            inline for (0..WORDS_PER_BLOCK) |w| {
+                self.blocks[blk_idx][w] = (p1.blocks[blk_idx][w] & mask[w]) | (p2.blocks[blk_idx][w] & ~mask[w]);
+            }
+        }
+
+        pub fn cleanPadding(self: *Self, active_bits: usize) void {
+            if (active_bits >= total_bits) return;
+            const active_blk = active_bits / BITS_PER_BLOCK;
+            const rem_bits = active_bits % BITS_PER_BLOCK;
+
+            inline for (0..num_blocks) |blk| {
+                if (blk > active_blk) {
+                    inline for (0..WORDS_PER_BLOCK) |w| {
+                        self.blocks[blk][w] = 0;
+                    }
+                }
+            }
+
+            if (active_blk < num_blocks) {
+                const active_w = rem_bits / 64;
+                const rem_w_bits = rem_bits % 64;
+                inline for (0..WORDS_PER_BLOCK) |w| {
+                    if (w > active_w) {
+                        self.blocks[active_blk][w] = 0;
+                    } else if (w == active_w and rem_w_bits != 0) {
+                        const mask = (@as(u64, 1) << @intCast(rem_w_bits)) - 1;
+                        self.blocks[active_blk][w] &= mask;
+                    }
+                }
+            }
+        }
+    };
+}
+
 pub fn Population(comptime L: usize) type {
     const Chrom = Chromosome(L);
 
@@ -225,10 +360,14 @@ pub const DynamicChromosome = struct {
     }
 
     pub fn cleanPadding(self: *DynamicChromosome) void {
+        const active_words = (self.bit_length + 63) / 64;
         const remainder = self.bit_length % 64;
-        if (remainder != 0 and self.words.len > 0) {
+        if (remainder != 0 and active_words > 0 and active_words <= self.words.len) {
             const mask = (@as(u64, 1) << @intCast(remainder)) - 1;
-            self.words[self.words.len - 1] &= mask;
+            self.words[active_words - 1] &= mask;
+        }
+        for (active_words..self.words.len) |w| {
+            self.words[w] = 0;
         }
     }
 };
@@ -250,7 +389,8 @@ pub const DynamicPopulation = struct {
         std.debug.assert(size > 0);
         std.debug.assert(bit_len > 0);
 
-        const words_len = (bit_len + 63) / 64;
+        const raw_words = (bit_len + 63) / 64;
+        const words_len = std.mem.alignForward(usize, raw_words, WORDS_PER_BLOCK);
         const total_words = size * words_len;
 
         const memory = try allocator.alignedAlloc(u64, std.mem.Alignment.fromByteUnits(64), total_words);

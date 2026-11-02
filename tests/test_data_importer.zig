@@ -109,3 +109,38 @@ test "Importer: parse Asset Returns CSV and verify statistical moments" {
     // Var(AssetB) should be strictly greater than Var(AssetA)
     try std.testing.expect(cov[1 * 2 + 1] > cov[0 * 2 + 0]);
 }
+
+test "Importer: parse UIUC Airfoil .dat spline coordinates into Section A" {
+    const allocator = std.testing.allocator;
+    const dat_text =
+        \\ NACA 0012 AIRFOILS
+        \\      4.        4.
+        \\
+        \\ 0.0000000 0.0000000
+        \\ 0.2500000 0.0500000
+        \\ 0.5000000 0.0600000
+        \\ 1.0000000 0.0000000
+    ;
+
+    const buf = try importer.parseAirfoilDat(allocator, dat_text, 2.8, 0.0085);
+    defer allocator.free(buf);
+
+    var inst = try loader.StaticBufferInstance.init(buf);
+    const hdr = inst.header();
+
+    try std.testing.expectEqual(@as(u32, format.Magic), hdr.magic);
+    try std.testing.expectEqual(@as(u32, 5), hdr.domain_tag); // airfoil
+    try std.testing.expectEqual(@as(u32, 16), hdr.param_u32_0);
+    try std.testing.expectEqual(@as(u32, 4), hdr.param_u32_1); // 4 coordinates parsed
+    try std.testing.expectEqual(@as(f64, 2.8), hdr.param_f64_0);
+    try std.testing.expectEqual(@as(f64, 0.0085), hdr.param_f64_1);
+
+    const pts = try inst.getSlice(big_ll.data_generator.Point, hdr.offset_section_a, 4);
+    try std.testing.expectEqual(@as(usize, 4), pts.len);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), pts[0].x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.25), pts[1].x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.05), pts[1].y, 1e-6);
+
+    const dom = try big_ll.AirfoilDomain.initFromInstance(&inst);
+    try std.testing.expectEqual(@as(usize, 4), dom.raw_spline_points.?.len);
+}
