@@ -146,12 +146,12 @@ pub fn main() !void {
     std.debug.print("Hardware confirmed: Apple Silicon Unified Memory Architecture (UMA) Active\n\n", .{});
 
     // -------------------------------------------------------------------------
-    // Suite 1: Finance Markowitz QP Ultra-High Population Scaling (4K -> 4.19M)
+    // Suite 1: Finance Markowitz QP Ultra-High Population Scaling (4K -> 8.38M)
     // -------------------------------------------------------------------------
-    std.debug.print("--- Suite 1: Finance Markowitz QP Population Scaling (4,096 -> 4,194,304) ---\n", .{});
-    const finance_pops = [_]usize{ 4096, 16384, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304 };
+    std.debug.print("--- Suite 1: Finance Markowitz QP Population Scaling (4,096 -> 8,388,608) ---\n", .{});
+    const finance_pops = [_]usize{ 4096, 16384, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608 };
     inline for (finance_pops) |pop| {
-        const batches: usize = if (pop >= 2097152) 25 else if (pop >= 524288) 50 else if (pop >= 262144) 100 else 200;
+        const batches: usize = if (pop >= 4194304) 20 else if (pop >= 2097152) 25 else if (pop >= 524288) 50 else if (pop >= 262144) 100 else 200;
         try benchFinanceGpuZeroCopy(&engine, pop, batches);
     }
     std.debug.print("\n", .{});
