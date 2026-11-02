@@ -23,7 +23,7 @@ fn getTimestampNs() u64 {
     } else if (builtin.os.tag == .linux) {
         var ts: std.os.linux.timespec = undefined;
         _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
-        return @as(u64, @intCast(ts.tv_sec)) * 1_000_000_000 + @as(u64, @intCast(ts.tv_nsec));
+        return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
     } else {
         return 0;
     }

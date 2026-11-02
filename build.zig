@@ -8,6 +8,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     // Apple Silicon Dedicated Metal GPU Batch Acceleration Configuration
@@ -28,6 +29,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "big_ll", .module = core_mod },
             },
@@ -80,6 +82,7 @@ pub fn build(b: *std.Build) void {
                 .root_source_file = b.path(path),
                 .target = target,
                 .optimize = optimize,
+                .link_libc = true,
                 .imports = &.{
                     .{ .name = "big_ll", .module = core_mod },
                 },
@@ -93,6 +96,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = .ReleaseFast,
+        .link_libc = true,
     });
 
     // Apple Silicon Dedicated Metal GPU Batch Acceleration Configuration
@@ -112,6 +116,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("benchmarks/bench_throughput.zig"),
             .target = target,
             .optimize = .ReleaseFast,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "big_ll", .module = bench_core_mod },
             },
@@ -127,6 +132,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("benchmarks/bench_memory.zig"),
             .target = target,
             .optimize = .ReleaseFast,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "big_ll", .module = bench_core_mod },
             },
@@ -142,6 +148,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("benchmarks/bench_domains.zig"),
             .target = target,
             .optimize = .ReleaseFast,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "big_ll", .module = bench_core_mod },
             },
@@ -157,6 +164,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("benchmarks/bench_real_domains.zig"),
             .target = target,
             .optimize = .ReleaseFast,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "big_ll", .module = bench_core_mod },
             },
@@ -172,6 +180,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("benchmarks/bench_scaled.zig"),
             .target = target,
             .optimize = .ReleaseFast,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "big_ll", .module = bench_core_mod },
             },
