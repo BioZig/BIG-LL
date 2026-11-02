@@ -199,6 +199,22 @@ static void ensure_fit_buffer(BigLLMetalContext* ctx, size_t required_bytes) {
     }
 }
 
+void* bigll_metal_get_shared_chrom_buffer(BigLLMetalContext* ctx, size_t required_bytes) {
+    if (!ctx) return NULL;
+    @autoreleasepool {
+        ensure_chrom_buffer(ctx, required_bytes);
+        return [ctx->shared_chrom_buf contents];
+    }
+}
+
+void* bigll_metal_get_shared_fit_buffer(BigLLMetalContext* ctx, size_t required_bytes) {
+    if (!ctx) return NULL;
+    @autoreleasepool {
+        ensure_fit_buffer(ctx, required_bytes);
+        return [ctx->shared_fit_buf contents];
+    }
+}
+
 bool bigll_metal_eval_onemax(
     BigLLMetalContext* ctx,
     const uint64_t* chrom_words,

@@ -183,22 +183,39 @@ It may seem counterintuitive that calculating a $16 \times 16$ covariance matrix
 
 Hardware: Apple M1 (8-core CPU: 4 Firestorm @ 3.2 GHz, 4 Icestorm @ 2.06 GHz; 8-core GPU: 1024 ALUs, Unified Memory).
 
-### 5.1 Dedicated Metal GPU Batch Scaling (`bench_metal`)
+### 5.1 Dedicated Metal GPU Ultra-Scale & Zero-Copy Telemetry (`bench_metal`)
 
-| Workload Domain | Population Size ($N$) | Latency / Batch ($\mu\text{s}$) | Evaluation Throughput | Rate |
-| :--- | :--- | :--- | :--- | :--- |
-| OneMax ($L=256$) | 4,096 | 218.55 | 18,741,367 evals/sec | 18.74 M/s |
-| OneMax ($L=256$) | 8,192 | 326.03 | 25,126,762 evals/sec | 25.13 M/s |
-| OneMax ($L=256$) | 16,384 | 254.81 | 64,297,890 evals/sec | **64.30 M/s** |
-| OneMax ($L=256$) | 32,768 | 333.53 | 98,244,990 evals/sec | **98.24 M/s** |
-| OneMax ($L=256$) | 65,536 | 482.81 | 135,737,583 evals/sec | **135.74 M/s** |
-| OneMax ($L=256$) | 131,072 | 979.15 | 133,862,645 evals/sec | **133.86 M/s** |
-| Finance QP (16 Assets) | 4,096 | 369.48 | 11,085,812 evals/sec | 11.09 M/s |
-| Finance QP (16 Assets) | 8,192 | 390.46 | 20,980,326 evals/sec | 20.98 M/s |
-| Finance QP (16 Assets) | 16,384 | 466.74 | 35,103,164 evals/sec | 35.10 M/s |
-| Finance QP (16 Assets) | 32,768 | 533.35 | 61,438,656 evals/sec | **61.44 M/s** |
-| Finance QP (16 Assets) | 65,536 | 589.98 | 111,081,653 evals/sec | **111.08 M/s** |
-| Finance QP (16 Assets) | 131,072 | 731.50 | 179,182,042 evals/sec | **179.18 M/s** |
+Measured with Apple Silicon Zero-Copy Unified Memory Architecture (`getSharedChromBuffer` / `getSharedFitnessBuffer`):
+
+| Workload Domain | Population Size ($N$) | Buffer Memory | Latency / Batch ($\mu\text{s}$) | Evaluation Throughput | Rate |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Finance QP (16 Assets) | 4,096 | 0.03 MB | 124.73 | 32,838,984 evals/sec | 32.84 M/s |
+| Finance QP (16 Assets) | 16,384 | 0.13 MB | 169.19 | 96,837,605 evals/sec | 96.84 M/s |
+| Finance QP (16 Assets) | 65,536 | 0.50 MB | 475.54 | 137,813,129 evals/sec | 137.81 M/s |
+| Finance QP (16 Assets) | 131,072 | 1.00 MB | 671.47 | 195,203,026 evals/sec | 195.20 M/s |
+| Finance QP (16 Assets) | 262,144 | 2.00 MB | 775.29 | 338,123,437 evals/sec | 338.12 M/s |
+| Finance QP (16 Assets) | 524,288 | 4.00 MB | 1,551.36 | 337,954,340 evals/sec | 337.95 M/s |
+| Finance QP (16 Assets) | 1,048,576 | 8.00 MB | 2,140.36 | 489,906,179 evals/sec | **489.91 M/s** |
+| Finance QP (16 Assets) | 2,097,152 | 16.00 MB | 2,565.16 | 817,551,051 evals/sec | **817.55 M/s** |
+| Finance QP (16 Assets) | 4,194,304 | 32.00 MB | 4,620.83 | 907,695,920 evals/sec | **907.70 M/s** |
+| OneMax ($L=256$) | 4,096 | 0.25 MB | 251.35 | 16,295,921 evals/sec | 16.30 M/s |
+| OneMax ($L=256$) | 16,384 | 1.00 MB | 248.01 | 66,060,743 evals/sec | 66.06 M/s |
+| OneMax ($L=256$) | 65,536 | 4.00 MB | 301.90 | 217,081,649 evals/sec | 217.08 M/s |
+| OneMax ($L=256$) | 262,144 | 16.00 MB | 913.82 | 286,865,862 evals/sec | 286.87 M/s |
+| OneMax ($L=256$) | 1,048,576 | 64.00 MB | 1,783.04 | 588,083,003 evals/sec | **588.08 M/s** |
+| OneMax ($L=256$) | 4,194,304 | 256.00 MB | 5,892.85 | 711,762,145 evals/sec | **711.76 M/s** |
+
+#### High-Dimensional Input Sets Scaling ($N = 65,536$ individuals per batch)
+
+| Chromosome Dimension ($L$) | 64-bit Words | Batch Memory | Latency / Batch ($\mu\text{s}$) | Evaluation Throughput | Rate |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| $L = 256$ bits | 4 words | 4.00 MB | 366.63 | 178,754,449 evals/sec | **178.75 M/s** |
+| $L = 512$ bits | 8 words | 8.00 MB | 432.71 | 151,454,491 evals/sec | **151.45 M/s** |
+| $L = 1,024$ bits | 16 words | 12.00 MB | 685.66 | 95,580,435 evals/sec | **95.58 M/s** |
+| $L = 2,048$ bits | 32 words | 20.00 MB | 786.81 | 83,293,474 evals/sec | **83.29 M/s** |
+| $L = 4,096$ bits | 64 words | 36.00 MB | 1,364.76 | 48,020,253 evals/sec | **48.02 M/s** |
+| $L = 8,192$ bits | 128 words | 68.00 MB | 2,437.62 | 26,885,195 evals/sec | **26.89 M/s** |
+| $L = 20,480$ bits | 320 words | 164.00 MB | 5,270.87 | 12,433,621 evals/sec | **12.43 M/s** |
 
 ### 5.2 CPU Multi-Core Scaling (`bench_throughput`)
 

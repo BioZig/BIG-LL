@@ -51,6 +51,24 @@ pub const MetalEngine = struct {
         }
     }
 
+    pub fn getSharedChromBuffer(self: *Self, comptime T: type, count: usize) ?[]T {
+        if (!is_darwin) return null;
+        const raw_ctx = self.handle orelse return null;
+        const total_bytes = count * @sizeOf(T);
+        const ptr = c.bigll_metal_get_shared_chrom_buffer(@ptrCast(@alignCast(raw_ctx)), total_bytes) orelse return null;
+        const typed_ptr: [*]T = @ptrCast(@alignCast(ptr));
+        return typed_ptr[0..count];
+    }
+
+    pub fn getSharedFitnessBuffer(self: *Self, count: usize) ?[]f32 {
+        if (!is_darwin) return null;
+        const raw_ctx = self.handle orelse return null;
+        const total_bytes = count * @sizeOf(f32);
+        const ptr = c.bigll_metal_get_shared_fit_buffer(@ptrCast(@alignCast(raw_ctx)), total_bytes) orelse return null;
+        const typed_ptr: [*]f32 = @ptrCast(@alignCast(ptr));
+        return typed_ptr[0..count];
+    }
+
     pub fn evalOneMax(
         self: *Self,
         comptime L: usize,

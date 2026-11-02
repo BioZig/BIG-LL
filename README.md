@@ -69,6 +69,8 @@ Isolates algorithmic loop mechanics (selection, crossover, mutation, popcount) f
 | **BIG-LL (8 Hetero Cores, Symmetric)** | 4P + 4E Equal Split | 4,096 | $409.2$ | **10,010,000** |
 | **BIG-LL (8 Hetero Cores, Asymmetric)** | 4P (72%) + 4E (28%) | 4,096 | $195.4$ | **20,963,380** |
 | **BIG-LL (Metal GPU UMA)** | 1,024 GPU ALUs | 65,536 | $482.8$ | **135,737,583** |
+| **BIG-LL (Metal GPU Zero-Copy)** | 1,024 GPU ALUs | 1,048,576 | $1,783.0$ | **588,083,003** |
+| **BIG-LL (Metal GPU Zero-Copy)** | 1,024 GPU ALUs | 4,194,304 | $5,892.8$ | **711,762,145** |
 
 *Note on Heterogeneous Scaling*: Adding the 4 Icestorm E-cores to the 4 Firestorm P-cores on the exact same workload ($N=4096$) increases net throughput from $19.50\text{M}$ to $20.96\text{M}$ evals/sec. Because E-cores run at 2.06 GHz with narrower 4-wide decode (vs. 3.2 GHz and 8-wide decode on Firestorm), E-cores provide $\approx 28\%$ of total SoC capacity. Symmetric scheduling causes severe barrier starvation ($10.01\text{M}$), which BIG-LL's asymmetric 72%/28% split resolves.
 
@@ -82,6 +84,9 @@ Evaluates continuous weight normalization, expected return dot product, and a $1
 | **BIG-LL (Metal GPU UMA)** | 1,024 GPU ALUs | 16,384 | $336.9$ | **48,633,025** |
 | **BIG-LL (Metal GPU UMA)** | 1,024 GPU ALUs | 65,536 | $478.7$ | **136,891,365** |
 | **BIG-LL (Metal GPU UMA)** | 1,024 GPU ALUs | 131,072 | $741.5$ | **176,777,339** |
+| **BIG-LL (Metal GPU Zero-Copy)** | 1,024 GPU ALUs | 1,048,576 | $2,140.4$ | **489,906,179** |
+| **BIG-LL (Metal GPU Zero-Copy)** | 1,024 GPU ALUs | 2,097,152 | $2,565.2$ | **817,551,051** |
+| **BIG-LL (Metal GPU Zero-Copy)** | 1,024 GPU ALUs | 4,194,304 | $4,620.8$ | **907,695,920** |
 
 *Why Finance QP Reaches Higher Throughput than OneMax on GPU*:
 1. **Memory Bandwidth Footprint**: OneMax ($L=256$) passes a 64-byte padded struct per individual ($8.39\text{ MB}$ per batch of 131k). Finance QP packs 16 4-bit asset allocations into a single 64-bit integer ($8\text{ bytes}$ per individual $\to 1.05\text{ MB}$ per batch). Finance reads **$8\times$ less data from DRAM**.

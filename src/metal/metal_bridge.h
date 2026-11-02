@@ -27,6 +27,10 @@ void* bigll_metal_alloc_shared(BigLLMetalContext* ctx, size_t bytes);
 // Free buffer allocated with bigll_metal_alloc_shared
 void bigll_metal_free_shared(BigLLMetalContext* ctx, void* ptr, size_t bytes);
 
+// Ensure and retrieve persistent shared UMA buffers for true zero-copy evaluation
+void* bigll_metal_get_shared_chrom_buffer(BigLLMetalContext* ctx, size_t required_bytes);
+void* bigll_metal_get_shared_fit_buffer(BigLLMetalContext* ctx, size_t required_bytes);
+
 // Batch OneMax popcount evaluation on Apple Silicon GPU ALUs
 // Supports arbitrary struct stride between chromosomes for zero-copy struct evaluation
 bool bigll_metal_eval_onemax(

@@ -122,4 +122,12 @@ pub fn main() !void {
 
     // Tier 6: L=8192 (4 batches: multi-stride rotation scheduling)
     try benchmarkDimension(allocator, 8192, 1024, 25);
+
+    // Tier 7: L=20480 (10 batches: multi-stride rotation scheduling)
+    try benchmarkDimension(allocator, 20480, 1024, 15);
+
+    std.debug.print("\n--- CPU Population Scaling Suite (L=256, pop=1024 -> 16384) ---\n", .{});
+    try benchmarkDimension(allocator, 256, 1024, 100);
+    try benchmarkDimension(allocator, 256, 4096, 50);
+    try benchmarkDimension(allocator, 256, 16384, 25);
 }

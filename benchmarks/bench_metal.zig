@@ -27,17 +27,14 @@ fn getTimestampNs() u64 {
     return 0;
 }
 
-fn benchOneMaxGpu(
-    allocator: std.mem.Allocator,
+fn benchOneMaxGpuZeroCopy(
     engine: *MetalEngine,
     comptime L: usize,
     pop_size: usize,
     batches: usize,
 ) !void {
-    const chroms = try allocator.alloc(Chromosome(L), pop_size);
-    defer allocator.free(chroms);
-    const fitnesses = try allocator.alloc(f32, pop_size);
-    defer allocator.free(fitnesses);
+    const chroms = engine.getSharedChromBuffer(Chromosome(L), pop_size) orelse return error.OutOfMemory;
+    const fitnesses = engine.getSharedFitnessBuffer(pop_size) orelse return error.OutOfMemory;
 
     var prng = Xoshiro256.init(12345);
     for (chroms) |*c| {
@@ -47,7 +44,7 @@ fn benchOneMaxGpu(
     }
 
     // Warmup
-    for (0..10) |_| {
+    for (0..5) |_| {
         _ = engine.evalOneMax(L, chroms, fitnesses);
     }
 
@@ -62,10 +59,12 @@ fn benchOneMaxGpu(
     const total_sec = @as(f64, @floatFromInt(total_ns)) / 1_000_000_000.0;
     const evals_per_sec = @as(f64, @floatFromInt(total_evals)) / total_sec;
     const us_per_batch = (@as(f64, @floatFromInt(total_ns)) / @as(f64, @floatFromInt(batches))) / 1_000.0;
+    const mb_per_batch = @as(f64, @floatFromInt(pop_size * @sizeOf(Chromosome(L)))) / (1024.0 * 1024.0);
 
-    std.debug.print("benchmark=metal domain=onemax l={d} pop_size={d} batches={d} total_sec={d:.4} us_per_batch={d:.2} evals_per_sec={d:.2} million_evals_sec={d:.2} sample_fit={d:.0}\n", .{
+    std.debug.print("benchmark=metal_zerocopy domain=onemax l={d:<5} pop_size={d:<8} mb={d:>6.2} batches={d:<3} total_sec={d:.4} us_per_batch={d:>9.2} evals_per_sec={d:>12.2} million_evals_sec={d:>8.2} sample_fit={d:.0}\n", .{
         L,
         pop_size,
+        mb_per_batch,
         batches,
         total_sec,
         us_per_batch,
@@ -75,16 +74,13 @@ fn benchOneMaxGpu(
     });
 }
 
-fn benchFinanceGpu(
-    allocator: std.mem.Allocator,
+fn benchFinanceGpuZeroCopy(
     engine: *MetalEngine,
     pop_size: usize,
     batches: usize,
 ) !void {
-    const chroms = try allocator.alloc(u64, pop_size);
-    defer allocator.free(chroms);
-    const fitnesses = try allocator.alloc(f32, pop_size);
-    defer allocator.free(fitnesses);
+    const chroms = engine.getSharedChromBuffer(u64, pop_size) orelse return error.OutOfMemory;
+    const fitnesses = engine.getSharedFitnessBuffer(pop_size) orelse return error.OutOfMemory;
 
     var prng = Xoshiro256.init(54321);
     for (chroms) |*c| {
@@ -101,7 +97,7 @@ fn benchFinanceGpu(
     }
 
     // Warmup
-    for (0..10) |_| {
+    for (0..5) |_| {
         _ = engine.evalFinance(chroms, fitnesses, &returns, &cov, 16, 1.0);
     }
 
@@ -116,9 +112,11 @@ fn benchFinanceGpu(
     const total_sec = @as(f64, @floatFromInt(total_ns)) / 1_000_000_000.0;
     const evals_per_sec = @as(f64, @floatFromInt(total_evals)) / total_sec;
     const us_per_batch = (@as(f64, @floatFromInt(total_ns)) / @as(f64, @floatFromInt(batches))) / 1_000.0;
+    const mb_per_batch = @as(f64, @floatFromInt(pop_size * @sizeOf(u64))) / (1024.0 * 1024.0);
 
-    std.debug.print("benchmark=metal domain=finance assets=16 pop_size={d} batches={d} total_sec={d:.4} us_per_batch={d:.2} evals_per_sec={d:.2} million_evals_sec={d:.2} sample_fit={d:.4}\n", .{
+    std.debug.print("benchmark=metal_zerocopy domain=finance assets=16 pop_size={d:<8} mb={d:>6.2} batches={d:<3} total_sec={d:.4} us_per_batch={d:>9.2} evals_per_sec={d:>12.2} million_evals_sec={d:>8.2} sample_fit={d:.4}\n", .{
         pop_size,
+        mb_per_batch,
         batches,
         total_sec,
         us_per_batch,
@@ -129,9 +127,10 @@ fn benchFinanceGpu(
 }
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-
-    std.debug.print("Apple Silicon Metal GPU Dedicated Acceleration Benchmark\n", .{});
+    std.debug.print("================================================================================\n", .{});
+    std.debug.print("   BIG-LL Dedicated Apple Silicon Metal GPU Acceleration Suite\n", .{});
+    std.debug.print("   Zero-Copy Unified Memory Architecture (UMA) Scaling Benchmark\n", .{});
+    std.debug.print("================================================================================\n\n", .{});
 
     if (!MetalEngine.isSupported()) {
         std.debug.print("Metal compute is not supported or not Apple Silicon UMA on this hardware.\n", .{});
@@ -144,18 +143,46 @@ pub fn main() !void {
     };
     defer engine.deinit();
 
-    std.debug.print("Hardware confirmed: Apple Silicon Unified Memory Architecture (UMA)\n\n", .{});
+    std.debug.print("Hardware confirmed: Apple Silicon Unified Memory Architecture (UMA) Active\n\n", .{});
 
-    // Suite 1: OneMax L=256 Scaling across Pop Sizes (4096 -> 131072)
-    const pops = [_]usize{ 4096, 8192, 16384, 32768, 65536, 131072 };
-    inline for (pops) |pop| {
-        try benchOneMaxGpu(allocator, &engine, 256, pop, 200);
+    // -------------------------------------------------------------------------
+    // Suite 1: Finance Markowitz QP Ultra-High Population Scaling (4K -> 4.19M)
+    // -------------------------------------------------------------------------
+    std.debug.print("--- Suite 1: Finance Markowitz QP Population Scaling (4,096 -> 4,194,304) ---\n", .{});
+    const finance_pops = [_]usize{ 4096, 16384, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304 };
+    inline for (finance_pops) |pop| {
+        const batches: usize = if (pop >= 2097152) 25 else if (pop >= 524288) 50 else if (pop >= 262144) 100 else 200;
+        try benchFinanceGpuZeroCopy(&engine, pop, batches);
     }
-
     std.debug.print("\n", .{});
 
-    // Suite 2: Finance Markowitz QP Portfolio Optimization across Pop Sizes
-    inline for (pops) |pop| {
-        try benchFinanceGpu(allocator, &engine, pop, 200);
+    // -------------------------------------------------------------------------
+    // Suite 2: OneMax L=256 Ultra-High Population Scaling (4K -> 4.19M)
+    // -------------------------------------------------------------------------
+    std.debug.print("--- Suite 2: OneMax L=256 Population Scaling (4,096 -> 4,194,304) ---\n", .{});
+    const onemax_pops = [_]usize{ 4096, 16384, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304 };
+    inline for (onemax_pops) |pop| {
+        const batches: usize = if (pop >= 2097152) 25 else if (pop >= 524288) 50 else if (pop >= 262144) 100 else 200;
+        try benchOneMaxGpuZeroCopy(&engine, 256, pop, batches);
     }
+    std.debug.print("\n", .{});
+
+    // -------------------------------------------------------------------------
+    // Suite 3: High-Dimensional Input Sets Scaling (L = 256 .. 20,480 bits)
+    // -------------------------------------------------------------------------
+    std.debug.print("--- Suite 3: OneMax High-Dimensional Input Sets Scaling (L=256 -> 20,480 bits) ---\n", .{});
+    const test_pop: usize = 65536;
+    const test_batches: usize = 50;
+
+    try benchOneMaxGpuZeroCopy(&engine, 256, test_pop, test_batches);
+    try benchOneMaxGpuZeroCopy(&engine, 512, test_pop, test_batches);
+    try benchOneMaxGpuZeroCopy(&engine, 1024, test_pop, test_batches);
+    try benchOneMaxGpuZeroCopy(&engine, 2048, test_pop, test_batches);
+    try benchOneMaxGpuZeroCopy(&engine, 4096, test_pop, test_batches);
+    try benchOneMaxGpuZeroCopy(&engine, 8192, test_pop, test_batches);
+    try benchOneMaxGpuZeroCopy(&engine, 20480, test_pop, test_batches);
+
+    std.debug.print("\n================================================================================\n", .{});
+    std.debug.print("   Metal GPU Scaled Benchmark Complete\n", .{});
+    std.debug.print("================================================================================\n", .{});
 }
