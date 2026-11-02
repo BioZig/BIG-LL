@@ -122,7 +122,7 @@ Data ingestion relies on memory-mapped binary containers ([`src/data/format.zig`
 ## 5. Execution & Reproduction Guide
 
 ### Prerequisites
-* Zig compiler (`0.14+` or `0.15-dev`).
+* Zig compiler `0.16.0` (or `0.16.0-dev`).
 * macOS with Apple Silicon (M1/M2/M3/M4) for Metal GPU acceleration. On Linux/x86_64, the CPU engine, thread pools, and domain adapters build and run with native AVX2/NEON optimizations.
 
 ### Run All Benchmarks
