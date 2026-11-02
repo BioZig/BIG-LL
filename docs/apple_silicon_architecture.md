@@ -231,8 +231,9 @@ BIG-LL enforces a deliberate architectural differentiation across operating envi
 | Architectural Dimension | Apple Silicon Tier (Flagship) | Linux Distros Tier (Headless Enterprise) |
 | :--- | :--- | :--- |
 | **GPU Acceleration** | **Native Metal Compute (UMA Zero-Copy)**: Direct CPU/GPU DRAM access at up to 800 GB/s with 0 bytes PCIe DMA overhead. | Headless CPU Only: No CUDA/ROCm dependencies; operates across any Linux distro without driver issues. |
-| **Multi-Core Topology** | **Hardware-Asymmetric Scheduling**: 72%/28% P-Core/E-Core balancing with `QOS_CLASS` core pinning. | Symmetric thread pools with thread affinity pinning (`pthread_setaffinity_np`). |
-| **Cluster Interconnect** | **Thunderbolt PCIe Mesh (`mesh`)**: 40–80 Gbps point-to-point DMA across Mac Studios. | **InfiniBand RDMA (`rdma`) & MPI (`mpi`)**: Standard high-performance HPC cluster interconnects. |
+| **Multi-Core Topology** | **Hardware-Asymmetric Scheduling**: 72%/28% P-Core/E-Core balancing with `QOS_CLASS_USER_INTERACTIVE` core pinning to Firestorm cores. | Symmetric thread pools with physical core affinity pinning via Linux `sched_setaffinity`. |
+| **Shape Adaptation** | **Hardware Bucket Ceiling Quantization**: Tiers quantized to cachelines ($C \in \{16, 32, 64, \dots, 20480\}$) with active-count masking; 0 B heap. | **Dual-Path Elastic Routing**: Fast hardware buckets ($L \le 32\text{k}$) with automatic fallback to `DynamicGeneticEngine` for out-of-core scales. |
+| **Cluster Interconnect** | **Thunderbolt PCIe Mesh (`mesh`)**: 40–80 Gbps point-to-point DMA across Mac Studios with `kqueue` notifications. | **InfiniBand RDMA (`rdma`) & MPI (`mpi`)**: Standard high-performance HPC cluster interconnects. |
 | **Primary Use-Case** | Real-time interactive optimization, local workstation workstations, sub-millisecond solves. | Massive batch jobs, high-dimensional parameter sweeps across hundreds of headless compute nodes. |
 
 ---

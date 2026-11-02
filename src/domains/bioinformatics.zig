@@ -17,6 +17,7 @@ pub fn ParameterizedBioinformaticsDomain(comptime num_snps: usize) type {
         triplets: ?[]const format.EpistasisTriplet = null,
         max_card: usize = MaxCard,
         card_penalty_weight: f64 = 8.0,
+        actual_snps: usize = num_snps,
 
         const Decoder = bool_set.BooleanSetDecoder(NUM_SNPS);
 
@@ -26,19 +27,23 @@ pub fn ParameterizedBioinformaticsDomain(comptime num_snps: usize) type {
         };
 
         pub fn initDefault() @This() {
-            return @This(){};
+            return @This(){
+                .actual_snps = NUM_SNPS,
+            };
         }
 
         pub fn initFromInstance(inst: anytype) !@This() {
             const hdr = inst.header();
             if (hdr.domain_tag != @intFromEnum(format.DomainTag.bioinformatics)) return error.DomainMismatch;
-            if (hdr.param_u32_0 != NUM_SNPS) return error.SnpCountMismatch;
+            const n = hdr.param_u32_0;
+            if (n > NUM_SNPS) return error.SnpCountMismatch;
 
-            const main_effects = try inst.getSlice(f64, hdr.offset_section_a, NUM_SNPS);
+            const main_effects = try inst.getSlice(f64, hdr.offset_section_a, n);
             const pairs = try inst.getSlice(format.EpistasisPair, hdr.offset_section_b, hdr.param_u32_3);
             const triplets = try inst.getSlice(format.EpistasisTriplet, hdr.offset_section_c, hdr.param_u32_4);
 
             return @This(){
+                .actual_snps = n,
                 .main_effects = main_effects,
                 .pairs = pairs,
                 .triplets = triplets,
@@ -59,10 +64,13 @@ pub fn ParameterizedBioinformaticsDomain(comptime num_snps: usize) type {
 
             var score: f64 = 0.0;
             var has_snp = [_]bool{false} ** NUM_SNPS;
+            var valid_count: usize = 0;
+            const n = self.actual_snps;
 
             for (panel.indices[0..panel.count]) |idx| {
-                if (idx < NUM_SNPS) {
+                if (idx < n) {
                     has_snp[idx] = true;
+                    valid_count += 1;
                     if (self.main_effects) |me| {
                         score += me[idx];
                     } else {
@@ -71,10 +79,11 @@ pub fn ParameterizedBioinformaticsDomain(comptime num_snps: usize) type {
                     }
                 }
             }
+            if (valid_count == 0) return 0.0;
 
             if (self.pairs) |p_slice| {
                 for (p_slice) |p| {
-                    if (p.idx1 < NUM_SNPS and p.idx2 < NUM_SNPS) {
+                    if (p.idx1 < n and p.idx2 < n) {
                         if (has_snp[p.idx1] and has_snp[p.idx2]) {
                             score += p.weight;
                         }
@@ -88,7 +97,7 @@ pub fn ParameterizedBioinformaticsDomain(comptime num_snps: usize) type {
                     .{ 45 % NUM_SNPS, 110 % NUM_SNPS },
                 };
                 for (epistasis_pairs) |pair| {
-                    if (has_snp[pair[0]] and has_snp[pair[1]]) {
+                    if (pair[0] < n and pair[1] < n and has_snp[pair[0]] and has_snp[pair[1]]) {
                         score += 15.0;
                     }
                 }
@@ -96,55 +105,57 @@ pub fn ParameterizedBioinformaticsDomain(comptime num_snps: usize) type {
 
             if (self.triplets) |t_slice| {
                 for (t_slice) |t| {
-                    if (t.idx1 < NUM_SNPS and t.idx2 < NUM_SNPS and t.idx3 < NUM_SNPS) {
+                    if (t.idx1 < n and t.idx2 < n and t.idx3 < n) {
                         if (has_snp[t.idx1] and has_snp[t.idx2] and has_snp[t.idx3]) {
                             score += t.weight;
                         }
                     }
                 }
             } else {
-                if (NUM_SNPS >= 100) {
+                if (NUM_SNPS >= 100 and n >= 100) {
                     if (has_snp[7] and has_snp[42] and has_snp[99]) {
                         score += 35.0;
                     }
                 }
             }
 
-            const penalty = Decoder.evaluateCardinalityPenalty(panel.count, self.max_card, self.card_penalty_weight);
+            const penalty = Decoder.evaluateCardinalityPenalty(valid_count, self.max_card, self.card_penalty_weight);
             return (100.0 + score) / (1.0 + penalty);
         }
 
         /// Direct bitboard evaluation bypassing intermediate index array decoding.
         /// Evaluates active SNP main effects and pairwise epistasis directly on the bitboard words.
         pub fn evaluateDirect(self: *const @This(), chrom: *const Chrom) f64 {
-            const active_count = chrom.popCount();
-            if (active_count == 0) return 0.0;
-
-            var score: f64 = 0.0;
             const words = &chrom.words;
+            const n = self.actual_snps;
+            var active_count: usize = 0;
+            var score: f64 = 0.0;
 
             if (self.main_effects) |me| {
-                for (0..NUM_SNPS) |idx| {
+                for (0..n) |idx| {
                     const w_idx = idx / 64;
                     const b_idx: u6 = @intCast(idx % 64);
                     if ((words[w_idx] & (@as(u64, 1) << b_idx)) != 0) {
                         score += me[idx];
+                        active_count += 1;
                     }
                 }
             } else {
-                for (0..NUM_SNPS) |idx| {
+                for (0..n) |idx| {
                     const w_idx = idx / 64;
                     const b_idx: u6 = @intCast(idx % 64);
                     if ((words[w_idx] & (@as(u64, 1) << b_idx)) != 0) {
                         const f_idx: f64 = @floatFromInt(idx);
                         score += 0.2 + 0.1 * @sin(f_idx * 0.3);
+                        active_count += 1;
                     }
                 }
             }
+            if (active_count == 0) return 0.0;
 
             if (self.pairs) |p_slice| {
                 for (p_slice) |p| {
-                    if (p.idx1 < NUM_SNPS and p.idx2 < NUM_SNPS) {
+                    if (p.idx1 < n and p.idx2 < n) {
                         const w1 = p.idx1 / 64;
                         const b1: u6 = @intCast(p.idx1 % 64);
                         const w2 = p.idx2 / 64;

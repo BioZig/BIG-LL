@@ -296,127 +296,123 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
 
     switch (domain_tag) {
         .logistics => {
-            switch (hdr.param_u32_0) {
-                16 => {
-                    const Dom = big_ll.ParameterizedLogisticsDomain(16, 16);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
-                },
-                31 => {
-                    const Dom = big_ll.ParameterizedLogisticsDomain(31, 16);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
-                },
-                32 => {
-                    const Dom = big_ll.ParameterizedLogisticsDomain(32, 16);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
-                },
-                64 => {
-                    const Dom = big_ll.ParameterizedLogisticsDomain(64, 16);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
-                },
-                else => {
-                    std.debug.print("error: unsupported customer count {d} for logistics domain. Supported: 16, 31, 32, 64.\n", .{hdr.param_u32_0});
-                    return error.UnsupportedCustomerCount;
-                },
+            const n = hdr.param_u32_0;
+            if (n <= 16) {
+                const Dom = big_ll.ParameterizedLogisticsDomain(16, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
+            } else if (n == 31) {
+                const Dom = big_ll.ParameterizedLogisticsDomain(31, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
+            } else if (n <= 32) {
+                const Dom = big_ll.ParameterizedLogisticsDomain(32, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
+            } else if (n <= 64) {
+                const Dom = big_ll.ParameterizedLogisticsDomain(64, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
+            } else if (n <= 128) {
+                const Dom = big_ll.ParameterizedLogisticsDomain(128, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
+            } else if (n <= 256) {
+                const Dom = big_ll.ParameterizedLogisticsDomain(256, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "logistics", file_path, options, allocator);
+            } else {
+                std.debug.print("error: customer count {d} exceeds hardware bucket capacity (max 256).\n", .{n});
+                return error.UnsupportedCustomerCount;
             }
         },
         .power_grid => {
-            switch (hdr.param_u32_0) {
-                8 => {
-                    const Dom = big_ll.ParameterizedPowerGridDomain(8, 16, 150.0);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
-                },
-                16 => {
-                    const Dom = big_ll.ParameterizedPowerGridDomain(16, 16, 300.0);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
-                },
-                32 => {
-                    const Dom = big_ll.ParameterizedPowerGridDomain(32, 16, 450.0);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
-                },
-                64 => {
-                    const Dom = big_ll.ParameterizedPowerGridDomain(64, 16, 900.0);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
-                },
-                else => {
-                    std.debug.print("error: unsupported generator count {d} for power grid domain. Supported: 8, 16, 32, 64.\n", .{hdr.param_u32_0});
-                    return error.UnsupportedGeneratorCount;
-                },
+            const n = hdr.param_u32_0;
+            if (n <= 8) {
+                const Dom = big_ll.ParameterizedPowerGridDomain(8, 16, 150.0);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
+            } else if (n <= 16) {
+                const Dom = big_ll.ParameterizedPowerGridDomain(16, 16, 300.0);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
+            } else if (n <= 32) {
+                const Dom = big_ll.ParameterizedPowerGridDomain(32, 16, 450.0);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
+            } else if (n <= 64) {
+                const Dom = big_ll.ParameterizedPowerGridDomain(64, 16, 900.0);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
+            } else if (n <= 128) {
+                const Dom = big_ll.ParameterizedPowerGridDomain(128, 16, 1800.0);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "power_grid", file_path, options, allocator);
+            } else {
+                std.debug.print("error: generator count {d} exceeds hardware bucket capacity (max 128).\n", .{n});
+                return error.UnsupportedGeneratorCount;
             }
         },
         .finance => {
-            switch (hdr.param_u32_0) {
-                6 => {
-                    const Dom = big_ll.ParameterizedFinanceDomain(6, 8, 16);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
-                },
-                16 => {
-                    const Dom = big_ll.ParameterizedFinanceDomain(16, 8, 16);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
-                },
-                32 => {
-                    const Dom = big_ll.ParameterizedFinanceDomain(32, 8, 16);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
-                },
-                64 => {
-                    const Dom = big_ll.ParameterizedFinanceDomain(64, 8, 16);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
-                },
-                else => {
-                    const Dom = big_ll.FinanceDomain;
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
-                },
+            const n = hdr.param_u32_0;
+            if (n <= 6) {
+                const Dom = big_ll.ParameterizedFinanceDomain(6, 8, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
+            } else if (n <= 16) {
+                const Dom = big_ll.ParameterizedFinanceDomain(16, 8, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
+            } else if (n <= 32) {
+                const Dom = big_ll.ParameterizedFinanceDomain(32, 8, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
+            } else if (n <= 64) {
+                const Dom = big_ll.ParameterizedFinanceDomain(64, 8, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
+            } else if (n <= 128) {
+                const Dom = big_ll.ParameterizedFinanceDomain(128, 8, 16);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "finance", file_path, options, allocator);
+            } else {
+                std.debug.print("error: asset count {d} exceeds hardware bucket capacity (max 128).\n", .{n});
+                return error.UnsupportedAssetCount;
             }
         },
         .bioinformatics => {
-            switch (hdr.param_u32_0) {
-                64 => {
-                    const Dom = big_ll.ParameterizedBioinformaticsDomain(64);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
-                },
-                128 => {
-                    const Dom = big_ll.ParameterizedBioinformaticsDomain(128);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
-                },
-                256 => {
-                    const Dom = big_ll.ParameterizedBioinformaticsDomain(256);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
-                },
-                512 => {
-                    const Dom = big_ll.ParameterizedBioinformaticsDomain(512);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
-                },
-                1024 => {
-                    const Dom = big_ll.ParameterizedBioinformaticsDomain(1024);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
-                },
-                20480 => {
-                    const Dom = big_ll.ParameterizedBioinformaticsDomain(20480);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
-                },
-                else => {
-                    const Dom = big_ll.BioinformaticsDomain;
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
-                },
+            const n = hdr.param_u32_0;
+            if (n <= 64) {
+                const Dom = big_ll.ParameterizedBioinformaticsDomain(64);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+            } else if (n <= 128) {
+                const Dom = big_ll.ParameterizedBioinformaticsDomain(128);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+            } else if (n <= 256) {
+                const Dom = big_ll.ParameterizedBioinformaticsDomain(256);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+            } else if (n <= 512) {
+                const Dom = big_ll.ParameterizedBioinformaticsDomain(512);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+            } else if (n <= 1024) {
+                const Dom = big_ll.ParameterizedBioinformaticsDomain(1024);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+            } else if (n <= 2048) {
+                const Dom = big_ll.ParameterizedBioinformaticsDomain(2048);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+            } else if (n <= 20480) {
+                const Dom = big_ll.ParameterizedBioinformaticsDomain(20480);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "bioinformatics", file_path, options, allocator);
+            } else {
+                std.debug.print("error: SNP count {d} exceeds hardware bucket capacity (max 20480).\n", .{n});
+                return error.UnsupportedSnpCount;
             }
         },
         .airfoil => {
@@ -424,26 +420,26 @@ fn cmdSolve(file_path: []const u8, options: SolveOptions, allocator: std.mem.All
             try executeSolve(big_ll.AirfoilDomain.CHROM_LEN, big_ll.AirfoilDomain, dom, "airfoil", file_path, options, allocator);
         },
         .telecom => {
-            switch (hdr.param_u32_0) {
-                8 => {
-                    const Dom = big_ll.ParameterizedTelecomDomain(8, 4, 2, 4);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "telecom", file_path, options, allocator);
-                },
-                16 => {
-                    const Dom = big_ll.ParameterizedTelecomDomain(16, 4, 2, 4);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "telecom", file_path, options, allocator);
-                },
-                32 => {
-                    const Dom = big_ll.ParameterizedTelecomDomain(32, 4, 2, 4);
-                    const dom = try Dom.initFromInstance(&inst);
-                    try executeSolve(Dom.CHROM_LEN, Dom, dom, "telecom", file_path, options, allocator);
-                },
-                else => {
-                    const dom = try big_ll.TelecomDomain.initFromInstance(&inst);
-                    try executeSolve(big_ll.TelecomDomain.CHROM_LEN, big_ll.TelecomDomain, dom, "telecom", file_path, options, allocator);
-                },
+            const n = hdr.param_u32_0;
+            if (n <= 8) {
+                const Dom = big_ll.ParameterizedTelecomDomain(8, 4, 2, 4);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "telecom", file_path, options, allocator);
+            } else if (n <= 16) {
+                const Dom = big_ll.ParameterizedTelecomDomain(16, 4, 2, 4);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "telecom", file_path, options, allocator);
+            } else if (n <= 32) {
+                const Dom = big_ll.ParameterizedTelecomDomain(32, 4, 2, 4);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "telecom", file_path, options, allocator);
+            } else if (n <= 64) {
+                const Dom = big_ll.ParameterizedTelecomDomain(64, 4, 2, 4);
+                const dom = try Dom.initFromInstance(&inst);
+                try executeSolve(Dom.CHROM_LEN, Dom, dom, "telecom", file_path, options, allocator);
+            } else {
+                std.debug.print("error: user count {d} exceeds hardware bucket capacity (max 64).\n", .{n});
+                return error.UnsupportedUserCount;
             }
         },
     }

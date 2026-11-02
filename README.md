@@ -120,12 +120,12 @@ BIG-LL decouples solver mechanics from input formats via a unified 64-byte align
 
 ---
 
-## 5. 20,480-Bit Dimensional Flexibility (512-Bit Cacheline Block Tiling)
+## 5. Dimensional Flexibility & Hardware-Aligned Bucket Ceiling Quantization
 
-To scale beyond small combinatorial bitboards up to whole-genome epistasis and ultra-dense combinatorial spaces, BIG-LL introduces a contiguous 512-bit block tiling architecture:
-* **`BlockChromosome(comptime num_blocks: usize)`**: Organizes bits into contiguous $N \times 512$-bit (64-byte) blocks, each matching an exact L1D cacheline.
-* **100% CPU Cache Residency**: At 20,480 bits ($40 \times 512$ bits = 2,560 bytes), an entire island population of 1,024 individuals occupies only **2.56 MB**—fitting completely within the 16–48 MB L2 / SLC cache on Apple Silicon.
-* **Bitwise Block Crossover & Invariant Masking**: Single-cycle logic multiplexing operates across 512-bit cachelines with active bit masking (`cleanPadding`), guaranteeing zero schema corruption.
+BIG-LL resolves the trade-off between compile-time monomorphization and arbitrary runtime shapes via **Hardware-Aligned Bucket Ceiling Quantization**:
+* **Contiguous 512-Bit Block Tiling (`BlockChromosome`)**: Organizes bits into contiguous $N \times 512$-bit (64-byte) blocks, each matching an exact L1D cacheline. At 20,480 bits ($40 \times 512$ bits = 2,560 bytes), an entire island population of 1,024 individuals occupies only **2.56 MB**—fitting completely within the 16–48 MB L2 / SLC cache on Apple Silicon.
+* **Hardware Bucket Dispatcher**: Problem instances with arbitrary customer counts (e.g. $N=47$), generator counts ($N=14$), asset counts ($N=10$), or SNP counts ($N=200$) are automatically assigned to the tightest hardware bucket ceiling ($16, 32, 64, 128, 256, 512, 1024, 2048, 20480$).
+* **Active-Count Masking & In-Stack Decoding**: The domain decoders (`RandomKeyDecoder.decodeFastCount`, `BooleanSetDecoder`, `GrayDecoder`) unpack and evaluate only the active $N$ items, masking inactive padding bits. All arrays remain stack-allocated value types, maintaining **0 bytes of runtime heap allocation** and full 10M–24M evals/sec speed.
 
 ---
 

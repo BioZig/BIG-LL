@@ -20,6 +20,7 @@ pub fn ParameterizedFinanceDomain(comptime num_assets: usize, comptime num_rules
         expected_returns: [NUM_ASSETS]f64,
         cov_matrix: [NUM_ASSETS][NUM_ASSETS]f64,
         risk_free_rate: f64,
+        actual_assets: usize = num_assets,
 
         const weight_params = [_]gray.FloatParam{.{ .min = 0.0, .max = 1.0, .bit_len = bits_per_weight }} ** NUM_ASSETS;
         const Decoder = minlp.MinlpDecoder(NUM_RULES, &weight_params);
@@ -29,6 +30,7 @@ pub fn ParameterizedFinanceDomain(comptime num_assets: usize, comptime num_rules
                 .expected_returns = undefined,
                 .cov_matrix = undefined,
                 .risk_free_rate = 0.03,
+                .actual_assets = NUM_ASSETS,
             };
 
             const base_returns = [_]f64{ 0.12, 0.09, 0.15, 0.07, 0.18, 0.05 };
@@ -52,21 +54,23 @@ pub fn ParameterizedFinanceDomain(comptime num_assets: usize, comptime num_rules
         pub fn initFromInstance(inst: anytype) !@This() {
             const hdr = inst.header();
             if (hdr.domain_tag != @intFromEnum(format.DomainTag.finance)) return error.DomainMismatch;
-            if (hdr.param_u32_0 != NUM_ASSETS) return error.AssetCountMismatch;
+            const n = hdr.param_u32_0;
+            if (n > NUM_ASSETS) return error.AssetCountMismatch;
             if (hdr.param_u32_1 != NUM_RULES) return error.RuleCountMismatch;
 
-            const returns = try inst.getSlice(f64, hdr.offset_section_a, NUM_ASSETS);
-            const cov_flat = try inst.getSlice(f64, hdr.offset_section_b, NUM_ASSETS * NUM_ASSETS);
+            const returns = try inst.getSlice(f64, hdr.offset_section_a, n);
+            const cov_flat = try inst.getSlice(f64, hdr.offset_section_b, n * n);
 
             var dom = @This(){
-                .expected_returns = undefined,
-                .cov_matrix = undefined,
+                .actual_assets = n,
+                .expected_returns = [_]f64{0.0} ** NUM_ASSETS,
+                .cov_matrix = [_][NUM_ASSETS]f64{[_]f64{0.0} ** NUM_ASSETS} ** NUM_ASSETS,
                 .risk_free_rate = hdr.param_f64_0,
             };
-            @memcpy(&dom.expected_returns, returns);
-            for (0..NUM_ASSETS) |i| {
-                for (0..NUM_ASSETS) |j| {
-                    dom.cov_matrix[i][j] = cov_flat[i * NUM_ASSETS + j];
+            @memcpy(dom.expected_returns[0..n], returns);
+            for (0..n) |i| {
+                for (0..n) |j| {
+                    dom.cov_matrix[i][j] = cov_flat[i * n + j];
                 }
             }
             return dom;
@@ -83,16 +87,17 @@ pub fn ParameterizedFinanceDomain(comptime num_assets: usize, comptime num_rules
         }
 
         pub fn evaluate(self: *const @This(), state: PortfolioState) f64 {
+            const n = self.actual_assets;
             var sum_w: f64 = 0.0;
-            for (state.weights) |w| sum_w += w;
+            for (state.weights[0..n]) |w| sum_w += w;
             if (sum_w <= 1e-6) return 0.0;
 
             const inv_sum_w = 1.0 / sum_w;
-            var norm_w: [NUM_ASSETS]f64 = undefined;
-            for (0..NUM_ASSETS) |i| norm_w[i] = state.weights[i] * inv_sum_w;
+            var norm_w: [NUM_ASSETS]f64 = [_]f64{0.0} ** NUM_ASSETS;
+            for (0..n) |i| norm_w[i] = state.weights[i] * inv_sum_w;
 
             var port_return: f64 = 0.0;
-            for (0..NUM_ASSETS) |i| {
+            for (0..n) |i| {
                 port_return += norm_w[i] * self.expected_returns[i];
             }
 
@@ -104,11 +109,11 @@ pub fn ParameterizedFinanceDomain(comptime num_assets: usize, comptime num_rules
             port_return *= rule_multiplier;
 
             var port_var: f64 = 0.0;
-            for (0..NUM_ASSETS) |i| {
+            for (0..n) |i| {
                 const w_i = norm_w[i];
                 if (w_i <= 1e-6) continue;
                 var row_sum: f64 = 0.0;
-                for (0..NUM_ASSETS) |j| {
+                for (0..n) |j| {
                     if (norm_w[j] > 1e-6) {
                         row_sum += norm_w[j] * self.cov_matrix[i][j];
                     }
@@ -118,7 +123,7 @@ pub fn ParameterizedFinanceDomain(comptime num_assets: usize, comptime num_rules
             const port_vol = @sqrt(@max(1e-6, port_var));
 
             var entropy_bonus: f64 = 0.0;
-            for (norm_w) |w| {
+            for (norm_w[0..n]) |w| {
                 if (w > 1e-6) {
                     entropy_bonus -= w * @log(w);
                 }

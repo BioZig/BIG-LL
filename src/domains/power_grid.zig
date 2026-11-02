@@ -23,6 +23,7 @@ pub fn ParameterizedPowerGridDomain(comptime num_generators: usize, comptime bit
         specs: [NUM_GENERATORS]GeneratorSpec,
         demand: f64,
         reserve_target: f64,
+        actual_generators: usize = num_generators,
 
         const scalar_params = [_]gray.FloatParam{.{ .min = 10.0, .max = MAX_MW, .bit_len = bits_per_scalar }} ** NUM_GENERATORS;
         pub const Decoder = minlp.MinlpDecoder(NUM_GENERATORS, &scalar_params);
@@ -33,6 +34,7 @@ pub fn ParameterizedPowerGridDomain(comptime num_generators: usize, comptime bit
                 .specs = undefined,
                 .demand = 550.0,
                 .reserve_target = 630.0,
+                .actual_generators = NUM_GENERATORS,
             };
 
             const base_specs = [_]GeneratorSpec{
@@ -59,15 +61,20 @@ pub fn ParameterizedPowerGridDomain(comptime num_generators: usize, comptime bit
         pub fn initFromInstance(inst: anytype) !@This() {
             const hdr = inst.header();
             if (hdr.domain_tag != @intFromEnum(format.DomainTag.power_grid)) return error.DomainMismatch;
-            if (hdr.param_u32_0 != NUM_GENERATORS) return error.GeneratorCountMismatch;
+            const n = hdr.param_u32_0;
+            if (n > NUM_GENERATORS) return error.GeneratorCountMismatch;
 
-            const specs_slice = try inst.getSlice(GeneratorSpec, hdr.offset_section_a, NUM_GENERATORS);
+            const specs_slice = try inst.getSlice(GeneratorSpec, hdr.offset_section_a, n);
             var dom = @This(){
+                .actual_generators = n,
                 .specs = undefined,
                 .demand = hdr.param_f64_0,
                 .reserve_target = hdr.param_f64_1,
             };
-            @memcpy(&dom.specs, specs_slice);
+            @memcpy(dom.specs[0..n], specs_slice);
+            for (n..NUM_GENERATORS) |i| {
+                dom.specs[i] = .{ .p_min = 0, .p_max = 0, .cost_a = 0, .cost_b = 0, .cost_no_load = 0 };
+            }
             return dom;
         }
 
@@ -82,8 +89,9 @@ pub fn ParameterizedPowerGridDomain(comptime num_generators: usize, comptime bit
             var total_gen: f64 = 0.0;
             var total_cap: f64 = 0.0;
             var active_count: usize = 0;
+            const n = self.actual_generators;
 
-            for (0..NUM_GENERATORS) |i| {
+            for (0..n) |i| {
                 if (state.switches[i] == 1) {
                     total_gen += state.scalars[i];
                     total_cap += self.specs[i].p_max;
@@ -98,7 +106,7 @@ pub fn ParameterizedPowerGridDomain(comptime num_generators: usize, comptime bit
 
             const delta_inv_cap = delta / total_cap;
 
-            for (0..NUM_GENERATORS) |i| {
+            for (0..n) |i| {
                 if (state.switches[i] == 1) {
                     const adjusted = state.scalars[i] - (delta_inv_cap * self.specs[i].p_max);
                     state.scalars[i] = std.math.clamp(adjusted, self.specs[i].p_min, self.specs[i].p_max);
@@ -110,8 +118,9 @@ pub fn ParameterizedPowerGridDomain(comptime num_generators: usize, comptime bit
             var total_gen: f64 = 0.0;
             var total_cost: f64 = 0.0;
             var total_capacity: f64 = 0.0;
+            const n = self.actual_generators;
 
-            for (0..NUM_GENERATORS) |i| {
+            for (0..n) |i| {
                 if (state.switches[i] == 1) {
                     const spec = self.specs[i];
                     const p = state.scalars[i];

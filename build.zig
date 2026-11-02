@@ -76,6 +76,7 @@ pub fn build(b: *std.Build) void {
         "tests/test_metal.zig",
         "tests/test_block_chromosome.zig",
         "tests/test_distributed.zig",
+        "tests/test_bucket_shapes.zig",
     };
 
     for (test_files) |path| {

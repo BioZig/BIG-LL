@@ -3,7 +3,9 @@ const builtin = @import("builtin");
 
 extern "c" fn pthread_set_qos_class_self_np(qos_class: c_uint, relative_priority: c_int) c_int;
 
-// Apple Silicon Heterogeneous QoS Affinity (Firestorm P-Cores vs Icestorm E-Cores)
+// Architecture-Aware Thread Pinning:
+// - Apple Silicon (macOS): QoS Class Pinning (QOS_CLASS_USER_INTERACTIVE to lock to Firestorm P-Cores)
+// - Linux Server: Core Affinity Pinning (sched_setaffinity to avoid cross-NUMA interconnect overhead)
 pub fn setWorkerQoSAffinity(worker_id: usize) void {
     if (builtin.os.tag == .macos or builtin.os.tag == .ios or builtin.os.tag == .watchos or builtin.os.tag == .tvos) {
         if (worker_id < 4) {
@@ -11,12 +13,25 @@ pub fn setWorkerQoSAffinity(worker_id: usize) void {
         } else {
             _ = pthread_set_qos_class_self_np(0x11, 0); // QOS_CLASS_UTILITY (Icestorm E-Cores)
         }
+    } else if (builtin.os.tag == .linux) {
+        // Pin worker thread to physical core (worker_id % 128)
+        var cpuset: std.os.linux.cpu_set_t = std.mem.zeroes(std.os.linux.cpu_set_t);
+        const cpu_id = worker_id % 128;
+        const mask_idx = cpu_id / 64;
+        const bit_idx: u6 = @intCast(cpu_id % 64);
+        cpuset.mask[mask_idx] |= (@as(usize, 1) << bit_idx);
+        _ = std.os.linux.sched_setaffinity(0, &cpuset);
     }
 }
 
 pub fn setHighPerformanceAffinity() void {
     if (builtin.os.tag == .macos or builtin.os.tag == .ios or builtin.os.tag == .watchos or builtin.os.tag == .tvos) {
         _ = pthread_set_qos_class_self_np(0x21, 0); // QOS_CLASS_USER_INTERACTIVE
+    } else if (builtin.os.tag == .linux) {
+        // Pin main thread to core 0
+        var cpuset: std.os.linux.cpu_set_t = std.mem.zeroes(std.os.linux.cpu_set_t);
+        cpuset.mask[0] |= 1;
+        _ = std.os.linux.sched_setaffinity(0, &cpuset);
     }
 }
 

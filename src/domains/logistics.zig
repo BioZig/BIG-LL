@@ -24,6 +24,7 @@ pub fn ParameterizedLogisticsDomain(comptime num_customers: usize, comptime key_
         customers: [NUM_CUSTOMERS]Customer,
         vehicle_capacity: f64,
         distance_matrix: ?[]const f64 = null,
+        actual_customers: usize = num_customers,
 
         const PermDecoder = rk.RandomKeyDecoder(NUM_CUSTOMERS, KEY_BITS);
 
@@ -33,6 +34,7 @@ pub fn ParameterizedLogisticsDomain(comptime num_customers: usize, comptime key_
                 .customers = undefined,
                 .vehicle_capacity = 35.0,
                 .distance_matrix = null,
+                .actual_customers = NUM_CUSTOMERS,
             };
 
             for (0..NUM_CUSTOMERS) |i| {
@@ -53,31 +55,42 @@ pub fn ParameterizedLogisticsDomain(comptime num_customers: usize, comptime key_
         pub fn initFromInstance(inst: anytype) !@This() {
             const hdr = inst.header();
             if (hdr.domain_tag != @intFromEnum(format.DomainTag.logistics)) return error.DomainMismatch;
-            if (hdr.param_u32_0 != NUM_CUSTOMERS) return error.CustomerCountMismatch;
+            const n = hdr.param_u32_0;
+            if (n > NUM_CUSTOMERS) return error.CustomerCountMismatch;
 
-            const points = try inst.getSlice(Point, hdr.offset_section_a, NUM_CUSTOMERS);
-            const demands = try inst.getSlice(f64, hdr.offset_section_b, NUM_CUSTOMERS);
-            const dist_matrix = try inst.getSlice(f64, hdr.offset_section_c, (NUM_CUSTOMERS + 1) * (NUM_CUSTOMERS + 1));
+            const points = try inst.getSlice(Point, hdr.offset_section_a, n);
+            const demands = try inst.getSlice(f64, hdr.offset_section_b, n);
+            const dist_matrix = try inst.getSlice(f64, hdr.offset_section_c, (n + 1) * (n + 1));
 
             var dom = @This(){
                 .depot = .{ .x = hdr.param_f64_1, .y = hdr.param_f64_2 },
                 .customers = undefined,
                 .vehicle_capacity = hdr.param_f64_0,
                 .distance_matrix = dist_matrix,
+                .actual_customers = n,
             };
-            for (0..NUM_CUSTOMERS) |i| {
+            for (0..n) |i| {
                 dom.customers[i] = .{
                     .loc = points[i],
                     .demand = demands[i],
+                };
+            }
+            for (n..NUM_CUSTOMERS) |i| {
+                dom.customers[i] = .{
+                    .loc = dom.depot,
+                    .demand = 0.0,
                 };
             }
             return dom;
         }
 
         pub fn decode(self: *const @This(), chrom: *const Chrom) [NUM_CUSTOMERS]u32 {
-            _ = self;
             var route: [NUM_CUSTOMERS]u32 = undefined;
-            PermDecoder.decode(&chrom.words, &route);
+            if (self.actual_customers == NUM_CUSTOMERS) {
+                PermDecoder.decode(&chrom.words, &route);
+            } else {
+                PermDecoder.decodeFastCount(&chrom.words, &route, self.actual_customers);
+            }
             return route;
         }
 
@@ -89,7 +102,7 @@ pub fn ParameterizedLogisticsDomain(comptime num_customers: usize, comptime key_
 
         pub fn getDistance(self: *const @This(), u_node: usize, v_node: usize) f64 {
             if (self.distance_matrix) |dm| {
-                const stride = NUM_CUSTOMERS + 1;
+                const stride = self.actual_customers + 1;
                 return dm[u_node * stride + v_node];
             } else {
                 const p1 = if (u_node == 0) self.depot else self.customers[u_node - 1].loc;
@@ -99,16 +112,17 @@ pub fn ParameterizedLogisticsDomain(comptime num_customers: usize, comptime key_
         }
 
         pub fn splitTour(self: *const @This(), route: [NUM_CUSTOMERS]u32) f64 {
+            const n = self.actual_customers;
             var V = [_]f64{std.math.inf(f64)} ** (NUM_CUSTOMERS + 1);
             V[0] = 0.0;
 
-            for (0..NUM_CUSTOMERS) |i| {
+            for (0..n) |i| {
                 if (V[i] == std.math.inf(f64)) continue;
 
                 var load: f64 = 0.0;
                 var cost: f64 = 0.0;
 
-                for (i..NUM_CUSTOMERS) |j| {
+                for (i..n) |j| {
                     const cust_idx = route[j];
                     const cust_node = cust_idx + 1;
                     load += self.customers[cust_idx].demand;
@@ -129,10 +143,12 @@ pub fn ParameterizedLogisticsDomain(comptime num_customers: usize, comptime key_
                 }
             }
 
-            return V[NUM_CUSTOMERS];
+            return V[n];
         }
 
         pub fn polishTour(self: *const @This(), route: *[NUM_CUSTOMERS]u32) void {
+            const n = self.actual_customers;
+            if (n < 4) return;
             var improved = true;
             var iterations: usize = 0;
             const max_iterations: usize = 30;
@@ -140,18 +156,18 @@ pub fn ParameterizedLogisticsDomain(comptime num_customers: usize, comptime key_
             while (improved and iterations < max_iterations) : (iterations += 1) {
                 improved = false;
 
-                for (0..NUM_CUSTOMERS - 1) |i| {
+                for (0..n - 1) |i| {
                     const u_node = route[i] + 1;
                     const u_next_node = route[i + 1] + 1;
                     const d_u_unext = self.getDistance(u_node, u_next_node);
 
-                    for (i + 2..NUM_CUSTOMERS) |j| {
+                    for (i + 2..n) |j| {
                         const v_node = route[j] + 1;
-                        const v_next_node = if (j + 1 < NUM_CUSTOMERS) route[j + 1] + 1 else 0;
-                        const d_v_vnext = if (j + 1 < NUM_CUSTOMERS) self.getDistance(v_node, v_next_node) else self.getDistance(v_node, 0);
+                        const v_next_node = if (j + 1 < n) route[j + 1] + 1 else 0;
+                        const d_v_vnext = if (j + 1 < n) self.getDistance(v_node, v_next_node) else self.getDistance(v_node, 0);
 
                         const d_new1 = self.getDistance(u_node, v_node);
-                        const d_new2 = if (j + 1 < NUM_CUSTOMERS) self.getDistance(u_next_node, v_next_node) else self.getDistance(u_next_node, 0);
+                        const d_new2 = if (j + 1 < n) self.getDistance(u_next_node, v_next_node) else self.getDistance(u_next_node, 0);
 
                         const delta = (d_new1 + d_new2) - (d_u_unext + d_v_vnext);
                         if (delta < -1e-6) {
@@ -174,14 +190,15 @@ pub fn ParameterizedLogisticsDomain(comptime num_customers: usize, comptime key_
         }
 
         pub fn evaluateGreedy(self: *const @This(), route: [NUM_CUSTOMERS]u32) f64 {
+            const n = self.actual_customers;
             var total_dist: f64 = 0.0;
             var current_load: f64 = 0.0;
 
             if (self.distance_matrix) |dm| {
-                const stride = NUM_CUSTOMERS + 1;
+                const stride = n + 1;
                 var current_node: usize = 0; // 0 is depot
 
-                for (route) |cust_idx| {
+                for (route[0..n]) |cust_idx| {
                     const cust = self.customers[cust_idx];
                     const cust_node = cust_idx + 1;
                     if (current_load + cust.demand > self.vehicle_capacity) {
@@ -196,7 +213,7 @@ pub fn ParameterizedLogisticsDomain(comptime num_customers: usize, comptime key_
                 total_dist += dm[current_node * stride + 0];
             } else {
                 var current_loc = self.depot;
-                for (route) |cust_idx| {
+                for (route[0..n]) |cust_idx| {
                     const cust = self.customers[cust_idx];
                     if (current_load + cust.demand > self.vehicle_capacity) {
                         total_dist += dist(current_loc, self.depot);

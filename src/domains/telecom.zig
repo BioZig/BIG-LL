@@ -24,6 +24,7 @@ pub fn ParameterizedTelecomDomain(
 
         channel_matrix: [NUM_USERS][NUM_USERS]f64,
         noise_power: f64,
+        actual_users: usize = num_users,
 
         const power_params = [_]gray.FloatParam{.{ .min = 0.1, .max = 2.0, .bit_len = bits_per_power }} ** NUM_USERS;
         const PowerDecoder = gray.GrayDecoder(&power_params);
@@ -32,6 +33,7 @@ pub fn ParameterizedTelecomDomain(
             var dom = @This(){
                 .channel_matrix = undefined,
                 .noise_power = 0.05,
+                .actual_users = NUM_USERS,
             };
 
             for (0..NUM_USERS) |i| {
@@ -50,34 +52,39 @@ pub fn ParameterizedTelecomDomain(
         pub fn initFromInstance(inst: anytype) !@This() {
             const hdr = inst.header();
             if (hdr.domain_tag != @intFromEnum(format.DomainTag.telecom)) return error.DomainMismatch;
-            if (hdr.param_u32_0 != NUM_USERS) return error.UserCountMismatch;
+            const n = hdr.param_u32_0;
+            if (n > NUM_USERS) return error.UserCountMismatch;
             if (hdr.param_u32_1 != NUM_CHANNELS) return error.ChannelCountMismatch;
 
-            const matrix_flat = try inst.getSlice(f64, hdr.offset_section_a, NUM_USERS * NUM_USERS);
+            const matrix_flat = try inst.getSlice(f64, hdr.offset_section_a, n * n);
             var dom = @This(){
-                .channel_matrix = undefined,
+                .actual_users = n,
+                .channel_matrix = [_][NUM_USERS]f64{[_]f64{0.0} ** NUM_USERS} ** NUM_USERS,
                 .noise_power = hdr.param_f64_0,
             };
-            for (0..NUM_USERS) |i| {
-                for (0..NUM_USERS) |j| {
-                    dom.channel_matrix[i][j] = matrix_flat[i * NUM_USERS + j];
+            for (0..n) |i| {
+                for (0..n) |j| {
+                    dom.channel_matrix[i][j] = matrix_flat[i * n + j];
                 }
             }
             return dom;
         }
 
         pub fn decode(self: *const @This(), chrom: *const Chrom) Allocation {
-            _ = self;
+            const n = self.actual_users;
             var alloc: Allocation = undefined;
 
-            for (0..NUM_USERS) |i| {
+            for (0..n) |i| {
                 const raw = gray.extractBits(&chrom.words, i * BITS_PER_CHANNEL, BITS_PER_CHANNEL);
                 alloc.channels[i] = @intCast(raw % NUM_CHANNELS);
+            }
+            for (n..NUM_USERS) |i| {
+                alloc.channels[i] = 0;
             }
 
             const power_offset = NUM_USERS * BITS_PER_CHANNEL;
             var power_words = [_]u64{0} ** ((NUM_USERS * BITS_PER_POWER + 63) / 64);
-            for (0..NUM_USERS) |i| {
+            for (0..n) |i| {
                 const p_raw = gray.extractBits(&chrom.words, power_offset + i * BITS_PER_POWER, BITS_PER_POWER);
                 gray.insertBits(&power_words, i * BITS_PER_POWER, BITS_PER_POWER, p_raw);
             }
@@ -89,13 +96,14 @@ pub fn ParameterizedTelecomDomain(
         pub fn evaluate(self: *const @This(), alloc: Allocation) f64 {
             var sum_rate: f64 = 0.0;
             var fairness_penalty: f64 = 0.0;
+            const n = self.actual_users;
 
-            for (0..NUM_USERS) |i| {
+            for (0..n) |i| {
                 const c_i = alloc.channels[i];
                 const s_i = alloc.powers[i] * self.channel_matrix[i][i];
                 var interference: f64 = 0.0;
 
-                for (0..NUM_USERS) |j| {
+                for (0..n) |j| {
                     if (i != j and alloc.channels[j] == c_i) {
                         interference += alloc.powers[j] * self.channel_matrix[j][i];
                     }
