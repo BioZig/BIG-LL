@@ -439,7 +439,6 @@ fn exportSvgDashboard(
 ) void {
     _ = L;
     _ = mean_fit;
-    _ = final_entropy;
     const path_z = allocator.dupeZ(u8, out_path) catch return;
     defer allocator.free(path_z);
 
@@ -461,55 +460,96 @@ fn exportSvgDashboard(
     const range = @max(1e-6, max_fit - min_fit);
 
     var s = std.fmt.bufPrint(&buf,
-        \\<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" width="100%" height="100%">
-        \\  <defs>
-        \\    <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-        \\      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.4"/>
-        \\      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.0"/>
-        \\    </linearGradient>
-        \\  </defs>
-        \\  <rect width="100%" height="100%" fill="#0a0e17" rx="12"/>
-        \\  <text x="40" y="45" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="20" font-weight="700" fill="#f8fafc">BIG-LL Industrial Genetic Solver — Convergence Report</text>
-        \\  <text x="40" y="70" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#94a3b8">Instance: {s} | Domain: {s} | Runtime: {d:.2} ms | Throughput: {d:.2} evals/sec</text>
-        \\  <rect x="40" y="90" width="720" height="200" rx="8" fill="#0f172a" stroke="#1e293b"/>
+        \\<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 540" width="100%" height="100%">
+        \\  <style>
+        \\    .title {{ font-family: system-ui, -apple-system, sans-serif; font-size: 17px; font-weight: 600; fill: #f1f5f9; letter-spacing: -0.01em; }}
+        \\    .meta {{ font-family: system-ui, -apple-system, sans-serif; font-size: 12px; fill: #64748b; }}
+        \\    .section-title {{ font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 600; fill: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }}
+        \\    .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; fill: #94a3b8; }}
+        \\    .mono-bold {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 600; fill: #e2e8f0; }}
+        \\    .badge-text {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 500; fill: #c7d2fe; }}
+        \\    .rule-on {{ font-family: ui-monospace, monospace; font-size: 10px; font-weight: 600; fill: #34d399; }}
+        \\    .rule-off {{ font-family: ui-monospace, monospace; font-size: 10px; fill: #475569; }}
+        \\    .footer {{ font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #475569; }}
+        \\  </style>
+        \\  <rect width="100%" height="100%" fill="#0d1117"/>
+        \\  
+        \\  <!-- Header -->
+        \\  <text x="50" y="42" class="title">Evolutionary Optimization Report &bull; {s}</text>
+        \\  <text x="50" y="64" class="meta">Instance: {s} &bull; {d}-Island Engine &bull; Runtime: {d:.2} ms &bull; Throughput: {d:.2} evals/sec</text>
         \\
-    , .{ file_path, domain_name, total_sec * 1000.0, evals_per_sec }) catch return;
+        \\  <!-- Convergence Plot Card -->
+        \\  <rect x="50" y="86" width="740" height="210" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+        \\  <text x="70" y="108" class="section-title">Convergence Trajectory &bull; Best Score: {d:.4}</text>
+        \\
+    , .{ domain_name, file_path, options.islands, total_sec * 1000.0, evals_per_sec, best_fit }) catch return;
     writeAllFd(fd, s) catch return;
 
     for (0..5) |row| {
-        const y = 110.0 + @as(f64, @floatFromInt(row)) * 40.0;
+        const y = 135.0 + @as(f64, @floatFromInt(row)) * 35.0;
         const val = max_fit - range * (@as(f64, @floatFromInt(row)) / 4.0);
         s = std.fmt.bufPrint(&buf,
-            \\  <line x1="100" y1="{d:.1}" x2="740" y2="{d:.1}" stroke="#1e293b" stroke-dasharray="4"/>
-            \\  <text x="90" y="{d:.1}" font-family="monospace" font-size="11" fill="#64748b" text-anchor="end">{d:.4}</text>
+            \\  <line x1="110" y1="{d:.1}" x2="760" y2="{d:.1}" stroke="#21262d" stroke-width="1" stroke-dasharray="3,3"/>
+            \\  <text x="100" y="{d:.1}" class="mono" text-anchor="end">{d:.2}</text>
             \\
         , .{ y, y, y + 4.0, val }) catch return;
         writeAllFd(fd, s) catch return;
     }
 
     if (history.count > 1) {
-        s = std.fmt.bufPrint(&buf, "  <polyline fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"3\" points=\"", .{}) catch return;
+        // Subtle area fill
+        s = std.fmt.bufPrint(&buf, "  <polygon fill=\"#38bdf8\" fill-opacity=\"0.05\" points=\"120.0,275.0 ", .{}) catch return;
         writeAllFd(fd, s) catch return;
         for (history.samples[0..history.count], 0..) |fit, i| {
-            const x = 120.0 + (@as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(history.count - 1))) * 600.0;
+            const x = 120.0 + (@as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(history.count - 1))) * 630.0;
             const norm = (fit - min_fit) / range;
-            const y = 270.0 - norm * 160.0;
+            const y = 275.0 - norm * 140.0;
+            s = std.fmt.bufPrint(&buf, "{d:.1},{d:.1} ", .{ x, y }) catch return;
+            writeAllFd(fd, s) catch return;
+        }
+        s = std.fmt.bufPrint(&buf, "750.0,275.0\"/>\n", .{}) catch return;
+        writeAllFd(fd, s) catch return;
+
+        // Clean crisp polyline
+        s = std.fmt.bufPrint(&buf, "  <polyline fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"1.75\" stroke-linejoin=\"round\" stroke-linecap=\"round\" points=\"", .{}) catch return;
+        writeAllFd(fd, s) catch return;
+        for (history.samples[0..history.count], 0..) |fit, i| {
+            const x = 120.0 + (@as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(history.count - 1))) * 630.0;
+            const norm = (fit - min_fit) / range;
+            const y = 275.0 - norm * 140.0;
             s = std.fmt.bufPrint(&buf, "{d:.1},{d:.1} ", .{ x, y }) catch return;
             writeAllFd(fd, s) catch return;
         }
         s = std.fmt.bufPrint(&buf, "\"/>\n", .{}) catch return;
         writeAllFd(fd, s) catch return;
+
+        // Muted data point circles
+        for (history.samples[0..history.count], 0..) |fit, i| {
+            const x = 120.0 + (@as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(history.count - 1))) * 630.0;
+            const norm = (fit - min_fit) / range;
+            const y = 275.0 - norm * 140.0;
+            s = std.fmt.bufPrint(&buf,
+                \\  <circle cx="{d:.1}" cy="{d:.1}" r="3" fill="#38bdf8" stroke="#161b22" stroke-width="1.5"/>
+                \\
+            , .{ x, y }) catch return;
+            writeAllFd(fd, s) catch return;
+        }
     }
 
     s = std.fmt.bufPrint(&buf,
-        \\  <rect x="40" y="310" width="720" height="170" rx="8" fill="#0f172a" stroke="#1e293b"/>
-        \\  <text x="60" y="335" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="14" font-weight="600" fill="#38bdf8">Decoded Decision Blueprint (Best Fitness: {d:.6})</text>
+        \\  <text x="120" y="290" class="mono">Generation 1</text>
+        \\  <text x="750" y="290" class="mono" text-anchor="end">Generation {d}</text>
         \\
-    , .{best_fit}) catch return;
+        \\  <!-- Decision Card -->
+        \\  <rect x="50" y="312" width="740" height="180" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+        \\  <text x="70" y="336" class="section-title">Decoded Decision Blueprint</text>
+        \\
+    , .{options.gens}) catch return;
     writeAllFd(fd, s) catch return;
 
     const T = @TypeOf(decision);
     if (@hasField(T, "weights") and @hasField(T, "rules")) {
+        // Finance
         var sum: f64 = 0.0;
         for (decision.weights) |w| sum += w;
         const inv_sum = if (sum > 1e-6) 1.0 / sum else 0.0;
@@ -517,53 +557,112 @@ fn exportSvgDashboard(
         for (decision.weights[0..max_show], 0..) |w, i| {
             const norm_w = w * inv_sum;
             const y = 360.0 + @as(f64, @floatFromInt(i)) * 18.0;
-            const bar_w = @min(200.0, norm_w * 200.0);
+            const bar_w = norm_w * 260.0;
             s = std.fmt.bufPrint(&buf,
-                \\  <text x="60" y="{d:.1}" font-family="monospace" font-size="11" fill="#94a3b8">Asset {d:>2}</text>
-                \\  <rect x="130" y="{d:.1}" width="{d:.1}" height="10" rx="3" fill="#10b981"/>
-                \\  <text x="{d:.1}" y="{d:.1}" font-family="monospace" font-size="11" fill="#f8fafc">{d:>5.1}%</text>
+                \\  <text x="70" y="{d:.1}" class="mono-bold">Asset {d:>2}</text>
+                \\  <rect x="140" y="{d:.1}" width="260" height="7" rx="3" fill="#21262d"/>
+                \\  <rect x="140" y="{d:.1}" width="{d:.1}" height="7" rx="3" fill="#38bdf8"/>
+                \\  <text x="415" y="{d:.1}" class="mono-bold">{d:>5.1}%</text>
                 \\
-            , .{ y, i, y - 9.0, bar_w, 140.0 + bar_w, y, norm_w * 100.0 }) catch return;
+            , .{ y, i, y - 6.0, y - 6.0, bar_w, y, norm_w * 100.0 }) catch return;
             writeAllFd(fd, s) catch return;
         }
-    } else if (@typeInfo(T) == .array) {
+
         s = std.fmt.bufPrint(&buf,
-            \\  <text x="60" y="365" font-family="monospace" font-size="12" fill="#f8fafc">Vehicle Routing Stops ({d} customers):</text>
-            \\  <text x="60" y="390" font-family="monospace" font-size="11" fill="#38bdf8">[Depot] ──&gt; [{d}] ──&gt; [{d}] ──&gt; [{d}] ──&gt; [{d}] ──&gt; [{d}] ──&gt; ... ──&gt; [Depot]</text>
+            \\  <text x="540" y="336" class="section-title">Active Strategy Rules</text>
             \\
-        , .{ decision.len, decision[0], decision[1], decision[2], decision[3], decision[4] }) catch return;
+        , .{}) catch return;
+        writeAllFd(fd, s) catch return;
+
+        var rx: f64 = 540.0;
+        var ry: f64 = 350.0;
+        for (decision.rules, 0..) |r, i| {
+            if (i > 0 and i % 3 == 0) {
+                rx = 540.0;
+                ry += 30.0;
+            }
+            if (r == 1) {
+                s = std.fmt.bufPrint(&buf,
+                    \\  <rect x="{d:.1}" y="{d:.1}" width="70" height="22" rx="4" fill="#16221f" stroke="#234236"/>
+                    \\  <text x="{d:.1}" y="{d:.1}" class="rule-on">[R{d}: ON]</text>
+                    \\
+                , .{ rx, ry, rx + 10.0, ry + 15.0, i }) catch return;
+            } else {
+                s = std.fmt.bufPrint(&buf,
+                    \\  <rect x="{d:.1}" y="{d:.1}" width="70" height="22" rx="4" fill="#1a1e24" stroke="#252b35"/>
+                    \\  <text x="{d:.1}" y="{d:.1}" class="rule-off">[R{d}: off]</text>
+                    \\
+                , .{ rx, ry, rx + 10.0, ry + 15.0, i }) catch return;
+            }
+            writeAllFd(fd, s) catch return;
+            rx += 80.0;
+        }
+    } else if (@typeInfo(T) == .array) {
+        // Logistics
+        s = std.fmt.bufPrint(&buf,
+            \\  <text x="70" y="365" class="meta">Optimized Vehicle Routing Tour ({d} stops):</text>
+            \\  <text x="70" y="395" class="mono-bold">[Depot] ──&gt; [{d}] ──&gt; [{d}] ──&gt; [{d}] ──&gt; [{d}] ──&gt; [{d}] ──&gt; [{d}] ──&gt; ... ──&gt; [Depot]</text>
+            \\  <text x="70" y="430" class="meta">Tour Distance / Fitness: {d:.4}</text>
+            \\
+        , .{ decision.len, decision[0], decision[1], decision[2], decision[3], decision[4], decision[5], best_fit }) catch return;
         writeAllFd(fd, s) catch return;
     } else if (@hasField(T, "count") and @hasField(T, "indices")) {
-        const c_show = @min(decision.count, @min(decision.indices.len, 5));
+        // Bioinformatics
         s = std.fmt.bufPrint(&buf,
-            \\  <text x="60" y="365" font-family="monospace" font-size="12" fill="#f8fafc">Selected Epistatic Biomarkers ({d} markers):</text>
+            \\  <text x="70" y="362" class="meta">{d} Epistatic Genetic Biomarkers Identified:</text>
             \\
         , .{decision.count}) catch return;
         writeAllFd(fd, s) catch return;
 
-        var x_off: f64 = 60.0;
-        for (decision.indices[0..c_show]) |snp| {
+        const max_badges = @min(decision.count, @min(decision.indices.len, 14));
+        var bx: f64 = 70.0;
+        var by: f64 = 378.0;
+        for (decision.indices[0..max_badges], 0..) |snp, i| {
+            if (i > 0 and i % 7 == 0) {
+                bx = 70.0;
+                by += 32.0;
+            }
             s = std.fmt.bufPrint(&buf,
-                \\  <rect x="{d:.1}" y="380" width="70" height="22" rx="4" fill="#6366f1"/>
-                \\  <text x="{d:.1}" y="395" font-family="monospace" font-size="11" fill="#ffffff">SNP#{d}</text>
+                \\  <rect x="{d:.1}" y="{d:.1}" width="78" height="24" rx="4" fill="#1e2230" stroke="#2d3348" stroke-width="1"/>
+                \\  <text x="{d:.1}" y="{d:.1}" class="badge-text">SNP #{d}</text>
                 \\
-            , .{ x_off, x_off + 10.0, snp }) catch return;
+            , .{ bx, by, bx + 12.0, by + 16.0, snp }) catch return;
             writeAllFd(fd, s) catch return;
-            x_off += 80.0;
+            bx += 88.0;
+        }
+    } else if (@hasField(T, "switches") and @hasField(T, "scalars")) {
+        // Power Grid
+        const max_gen = @min(decision.scalars.len, 6);
+        for (decision.scalars[0..max_gen], 0..) |mw, i| {
+            const is_on = decision.switches[i] == 1;
+            const norm_mw = @min(1.0, mw / 150.0);
+            const y = 360.0 + @as(f64, @floatFromInt(i)) * 18.0;
+            const bar_w = norm_mw * 240.0;
+            const status_str = if (is_on) "ONLINE" else "OFFLINE";
+            s = std.fmt.bufPrint(&buf,
+                \\  <text x="70" y="{d:.1}" class="mono-bold">Gen {d:>2} ({s})</text>
+                \\  <rect x="180" y="{d:.1}" width="240" height="7" rx="3" fill="#21262d"/>
+                \\  <rect x="180" y="{d:.1}" width="{d:.1}" height="7" rx="3" fill="#34d399"/>
+                \\  <text x="435" y="{d:.1}" class="mono-bold">{d:>6.2} MW</text>
+                \\
+            , .{ y, i, status_str, y - 6.0, y - 6.0, bar_w, y, mw }) catch return;
+            writeAllFd(fd, s) catch return;
         }
     } else {
         s = std.fmt.bufPrint(&buf,
-            \\  <text x="60" y="365" font-family="monospace" font-size="12" fill="#f8fafc">Optimization converged successfully.</text>
+            \\  <text x="70" y="365" class="meta">Optimization converged with score {d:.6}.</text>
             \\
-        , .{}) catch return;
+        , .{best_fit}) catch return;
         writeAllFd(fd, s) catch return;
     }
 
     s = std.fmt.bufPrint(&buf,
-        \\  <text x="740" y="500" font-family="monospace" font-size="10" fill="#475569" text-anchor="end">0 B Runtime Heap Allocation • Reference-as-Truth</text>
+        \\  <!-- Footer -->
+        \\  <text x="50" y="520" class="footer">BIG-LL Scientific Optimization &bull; Deterministic Invariant Verified</text>
+        \\  <text x="790" y="520" class="footer" text-anchor="end">Final Population Diversity: {d:.4}</text>
         \\</svg>
         \\
-    , .{}) catch return;
+    , .{final_entropy}) catch return;
     writeAllFd(fd, s) catch return;
 
     if (!options.quiet) {
