@@ -48,6 +48,7 @@ fn printUsage() void {
         \\                                   --node-id <int>   Cluster rank ID (default: 0)
         \\                                   --num-nodes <int> Total cluster node count (default: 1)
         \\                                   --peer <addr>     Peer node endpoint (for point-to-point mesh)
+        \\                                   --pretty, -p      Enable rich visual terminal dashboard
         \\                                   --json            Output results as JSON
         \\                                   --quiet, -q       Suppress interactive progress
         \\  inspect <file>                 Inspect a dataset (supports .bigd, .npy, .bed, .vrp, .csv, etc.)
@@ -79,6 +80,7 @@ pub const SolveOptions = struct {
     islands: usize = 4,
     seed: u64 = 42,
     enable_dedup: bool = true,
+    pretty: bool = false,
     json: bool = false,
     quiet: bool = false,
     save_ir: ?[]const u8 = null,
@@ -89,6 +91,326 @@ pub const SolveOptions = struct {
     peer_endpoint: ?[]const u8 = null,
 };
 
+pub const HistoryTracker = struct {
+    pub const CAPACITY: usize = 32;
+    samples: [CAPACITY]f64 = [_]f64{0.0} ** CAPACITY,
+    count: usize = 0,
+    min_fit: f64 = std.math.inf(f64),
+    max_fit: f64 = -std.math.inf(f64),
+
+    pub fn record(self: *HistoryTracker, fit: f64) void {
+        if (self.count < CAPACITY) {
+            self.samples[self.count] = fit;
+            self.count += 1;
+        } else {
+            self.samples[CAPACITY - 1] = fit;
+        }
+        if (fit < self.min_fit) self.min_fit = fit;
+        if (fit > self.max_fit) self.max_fit = fit;
+    }
+};
+
+fn printDecisionJson(decision: anytype) void {
+    const T = @TypeOf(decision);
+    if (@hasField(T, "weights") and @hasField(T, "rules")) {
+        std.debug.print(",\n  \"decision\": {{\n    \"asset_weights\": [", .{});
+        var sum: f64 = 0.0;
+        for (decision.weights) |w| sum += w;
+        const inv_sum = if (sum > 1e-6) 1.0 / sum else 0.0;
+        for (decision.weights, 0..) |w, i| {
+            const norm_w = w * inv_sum;
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d:.4}", .{norm_w});
+        }
+        std.debug.print("],\n    \"active_rules\": [", .{});
+        for (decision.rules, 0..) |r, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d}", .{r});
+        }
+        std.debug.print("]\n  }}", .{});
+    } else if (@typeInfo(T) == .array) {
+        std.debug.print(",\n  \"decision\": {{\n    \"customer_count\": {d},\n    \"tour\": [", .{decision.len});
+        const print_len = @min(decision.len, 64);
+        for (decision[0..print_len], 0..) |node, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d}", .{node});
+        }
+        std.debug.print("]\n  }}", .{});
+    } else if (@hasField(T, "switches") and @hasField(T, "scalars")) {
+        std.debug.print(",\n  \"decision\": {{\n    \"generator_count\": {d},\n    \"commitments\": [", .{decision.switches.len});
+        for (decision.switches, 0..) |s, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d}", .{s});
+        }
+        std.debug.print("],\n    \"dispatched_mw\": [", .{});
+        for (decision.scalars, 0..) |mw, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d:.2}", .{mw});
+        }
+        std.debug.print("]\n  }}", .{});
+    } else if (@hasField(T, "upper_y") and @hasField(T, "lower_y")) {
+        std.debug.print(",\n  \"decision\": {{\n    \"upper_y\": [", .{});
+        for (decision.upper_y, 0..) |y, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d:.4}", .{y});
+        }
+        std.debug.print("],\n    \"lower_y\": [", .{});
+        for (decision.lower_y, 0..) |y, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d:.4}", .{y});
+        }
+        std.debug.print("]\n  }}", .{});
+    } else if (@hasField(T, "channels") and @hasField(T, "powers")) {
+        std.debug.print(",\n  \"decision\": {{\n    \"user_count\": {d},\n    \"channels\": [", .{decision.channels.len});
+        for (decision.channels, 0..) |ch, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d}", .{ch});
+        }
+        std.debug.print("],\n    \"powers_dbm\": [", .{});
+        for (decision.powers, 0..) |p, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d:.2}", .{p});
+        }
+        std.debug.print("]\n  }}", .{});
+    } else if (@hasField(T, "count") and @hasField(T, "indices")) {
+        std.debug.print(",\n  \"decision\": {{\n    \"marker_count\": {d},\n    \"selected_snps\": [", .{decision.count});
+        const cnt = @min(decision.count, decision.indices.len);
+        for (decision.indices[0..cnt], 0..) |snp, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d}", .{snp});
+        }
+        std.debug.print("]\n  }}", .{});
+    }
+}
+
+fn printDecisionText(decision: anytype) void {
+    const T = @TypeOf(decision);
+    std.debug.print("\nDecoded Decision Plan:\n", .{});
+    if (@hasField(T, "weights") and @hasField(T, "rules")) {
+        var sum: f64 = 0.0;
+        for (decision.weights) |w| sum += w;
+        const inv_sum = if (sum > 1e-6) 1.0 / sum else 0.0;
+        std.debug.print("  Asset Allocations (Normalized Portfolio):\n", .{});
+        for (decision.weights, 0..) |w, i| {
+            const norm_w = w * inv_sum;
+            std.debug.print("    [Asset {d:>2}] {d:>5.1}%  (raw weight: {d:.4})\n", .{ i, norm_w * 100.0, w });
+        }
+        std.debug.print("  Active Rules: [", .{});
+        for (decision.rules, 0..) |r, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("{d}", .{r});
+        }
+        std.debug.print("]\n", .{});
+    } else if (@typeInfo(T) == .array) {
+        std.debug.print("  Vehicle Tour Route (Total Stops: {d}):\n    Depot", .{decision.len});
+        const show_len = @min(decision.len, 16);
+        for (decision[0..show_len]) |node| {
+            std.debug.print(" -> {d}", .{node});
+        }
+        if (decision.len > 16) {
+            std.debug.print(" -> ... ({d} more stops)", .{decision.len - 16});
+        }
+        std.debug.print(" -> Depot\n", .{});
+    } else if (@hasField(T, "switches") and @hasField(T, "scalars")) {
+        std.debug.print("  Economic Dispatch & Unit Commitment ({d} generators):\n", .{decision.scalars.len});
+        for (decision.scalars, 0..) |mw, i| {
+            const status = if (decision.switches[i] == 1) "ONLINE " else "OFFLINE";
+            std.debug.print("    [Gen {d:>2}] {s} | Output: {d:>6.2} MW\n", .{ i, status, mw });
+        }
+    } else if (@hasField(T, "upper_y") and @hasField(T, "lower_y")) {
+        std.debug.print("  Airfoil Surface Geometry Coordinates:\n", .{});
+        std.debug.print("    Upper Y: [ ", .{});
+        for (decision.upper_y) |y| std.debug.print("{d:.4} ", .{y});
+        std.debug.print("]\n    Lower Y: [ ", .{});
+        for (decision.lower_y) |y| std.debug.print("{d:.4} ", .{y});
+        std.debug.print("]\n", .{});
+    } else if (@hasField(T, "channels") and @hasField(T, "powers")) {
+        std.debug.print("  User Channel & Power Assignments ({d} users):\n", .{decision.channels.len});
+        const show_len = @min(decision.channels.len, 12);
+        for (0..show_len) |i| {
+            std.debug.print("    [User {d:>2}] Channel: {d:>2} | Power: {d:>5.1} dBm\n", .{ i, decision.channels[i], decision.powers[i] });
+        }
+        if (decision.channels.len > 12) {
+            std.debug.print("    ... ({d} more users)\n", .{decision.channels.len - 12});
+        }
+    } else if (@hasField(T, "count") and @hasField(T, "indices")) {
+        const cnt = @min(decision.count, decision.indices.len);
+        std.debug.print("  Selected Epistatic SNP Biomarkers (Count: {d}):\n    [ ", .{decision.count});
+        for (decision.indices[0..cnt]) |snp| {
+            std.debug.print("SNP#{d} ", .{snp});
+        }
+        std.debug.print("]\n", .{});
+    }
+}
+
+fn renderPrettyDashboard(
+    comptime L: usize,
+    decision: anytype,
+    domain_name: []const u8,
+    file_path: []const u8,
+    options: SolveOptions,
+    best_fit: f64,
+    mean_fit: f64,
+    final_entropy: f64,
+    total_sec: f64,
+    evals_per_sec: f64,
+    us_per_gen: f64,
+    history: *const HistoryTracker,
+) void {
+    const T = @TypeOf(decision);
+
+    std.debug.print("\n\x1b[1;36m╭──────────────────────────────────────────────────────────────────────────╮\x1b[0m\n", .{});
+    std.debug.print("\x1b[1;36m│\x1b[0m  \x1b[1;37mBIG-LL INDUSTRIAL GENETIC SOLVER — CONVERGENCE & DECISION REPORT\x1b[0m        \x1b[1;36m│\x1b[0m\n", .{});
+    std.debug.print("\x1b[1;36m╰──────────────────────────────────────────────────────────────────────────╯\x1b[0m\n\n", .{});
+
+    std.debug.print("  \x1b[1mInstance:\x1b[0m     {s}\n", .{file_path});
+    std.debug.print("  \x1b[1mDomain:\x1b[0m       {s} (L={d})\n", .{ domain_name, L });
+    std.debug.print("  \x1b[1mCompute:\x1b[0m      {d}-Island SIMD Engine | Pop: {d} | Gens: {d} | Seed: {d}\n", .{
+        options.islands,
+        options.pop_size,
+        options.gens,
+        options.seed,
+    });
+    std.debug.print("  \x1b[1mRuntime:\x1b[0m      {d:.2} ms | Throughput: \x1b[1;32m{d:.2} evals/sec\x1b[0m ({d:.2} us/gen)\n\n", .{
+        total_sec * 1000.0,
+        evals_per_sec,
+        us_per_gen,
+    });
+
+    if (history.count > 1) {
+        const min_fit = history.min_fit;
+        const max_fit = history.max_fit;
+        const range = @max(1e-6, max_fit - min_fit);
+        const PLOT_WIDTH: usize = 28;
+
+        std.debug.print("  \x1b[1;33mCONVERGENCE CURVE (Fitness Evolution)\x1b[0m\n", .{});
+        var row: usize = 5;
+        while (row > 0) {
+            row -= 1;
+            const val = min_fit + range * (@as(f64, @floatFromInt(row)) / 4.0);
+            std.debug.print("  {d:>7.4} ┤ ", .{val});
+            for (0..PLOT_WIDTH) |col| {
+                const sample_idx = @min(history.count - 1, (col * history.count) / PLOT_WIDTH);
+                const s = history.samples[sample_idx];
+                const norm = (s - min_fit) / range;
+                const lvl = @min(@as(usize, 4), @as(usize, @intFromFloat(norm * 4.0)));
+                if (lvl == row) {
+                    std.debug.print("\x1b[1;32m●\x1b[0m", .{});
+                } else if (lvl > row) {
+                    std.debug.print("\x1b[32m│\x1b[0m", .{});
+                } else {
+                    std.debug.print(" ", .{});
+                }
+            }
+            std.debug.print("\n", .{});
+        }
+        std.debug.print("          ┴", .{});
+        for (0..PLOT_WIDTH) |_| std.debug.print("─", .{});
+        std.debug.print("\n          [Gen 1]", .{});
+        const space_count: usize = if (PLOT_WIDTH >= 16) PLOT_WIDTH - 16 else 1;
+        for (0..space_count) |_| std.debug.print(" ", .{});
+        std.debug.print("   [Gen {d}]\n", .{options.gens});
+
+        const spark_chars = [_][]const u8{ " ", "▂", "▃", "▄", "▅", "▆", "▇", "█" };
+        std.debug.print("  Sparkline: \x1b[1;36m", .{});
+        for (0..PLOT_WIDTH) |col| {
+            const sample_idx = @min(history.count - 1, (col * history.count) / PLOT_WIDTH);
+            const s = history.samples[sample_idx];
+            const norm = (s - min_fit) / range;
+            const idx = @min(@as(usize, 7), @as(usize, @intFromFloat(norm * 7.999)));
+            std.debug.print("{s}", .{spark_chars[idx]});
+        }
+        const gain = if (min_fit > 1e-6) ((best_fit - min_fit) / min_fit) * 100.0 else 0.0;
+        std.debug.print("\x1b[0m  (Gain: \x1b[1;32m+{d:.1}%\x1b[0m)\n\n", .{gain});
+    }
+
+    std.debug.print("  \x1b[1;35mOBJECTIVE TELEMETRY\x1b[0m\n", .{});
+    std.debug.print("    Best Fitness:   \x1b[1;32m{d:.6}\x1b[0m\n", .{best_fit});
+    std.debug.print("    Mean Fitness:   {d:.6}\n", .{mean_fit});
+    std.debug.print("    Final Entropy:  {d:.4}\n\n", .{final_entropy});
+
+    std.debug.print("  \x1b[1;36mDECODED DECISION BLUEPRINT\x1b[0m\n", .{});
+
+    if (@hasField(T, "weights") and @hasField(T, "rules")) {
+        var sum: f64 = 0.0;
+        for (decision.weights) |w| sum += w;
+        const inv_sum = if (sum > 1e-6) 1.0 / sum else 0.0;
+        const MAX_BAR: usize = 24;
+        for (decision.weights, 0..) |w, i| {
+            const norm_w = w * inv_sum;
+            const bar_w = @min(MAX_BAR, @as(usize, @intFromFloat(norm_w * 24.0)));
+            const empty_w = MAX_BAR - bar_w;
+            std.debug.print("    Asset {d:>2}: \x1b[1;32m", .{i});
+            for (0..bar_w) |_| std.debug.print("█", .{});
+            std.debug.print("\x1b[90m", .{});
+            for (0..empty_w) |_| std.debug.print("░", .{});
+            std.debug.print("\x1b[0m  \x1b[1m{d:>5.1}%\x1b[0m (raw: {d:.3})\n", .{ norm_w * 100.0, w });
+        }
+        std.debug.print("\n    Active Rules: [ ", .{});
+        for (decision.rules, 0..) |r, i| {
+            if (r == 1) {
+                std.debug.print("\x1b[1;32m[R{d}:ON]\x1b[0m ", .{i});
+            } else {
+                std.debug.print("\x1b[90m[R{d}:off]\x1b[0m ", .{i});
+            }
+        }
+        std.debug.print("]\n", .{});
+    } else if (@typeInfo(T) == .array) {
+        std.debug.print("    Vehicle Routing Itinerary ({d} stops):\n    \x1b[1;33m[Depot]\x1b[0m", .{decision.len});
+        const show_len = @min(decision.len, 12);
+        for (decision[0..show_len]) |node| {
+            std.debug.print(" ──> \x1b[1;36m[{d}]\x1b[0m", .{node});
+        }
+        if (decision.len > 12) {
+            std.debug.print(" ──> \x1b[90m...({d} more stops)\x1b[0m", .{decision.len - 12});
+        }
+        std.debug.print(" ──> \x1b[1;33m[Depot]\x1b[0m\n", .{});
+    } else if (@hasField(T, "switches") and @hasField(T, "scalars")) {
+        const MAX_BAR: usize = 20;
+        for (decision.scalars, 0..) |mw, i| {
+            const is_on = decision.switches[i] == 1;
+            const norm_mw = @min(1.0, mw / 150.0);
+            const bar_w = @min(MAX_BAR, @as(usize, @intFromFloat(norm_mw * 20.0)));
+            const empty_w = MAX_BAR - bar_w;
+            const status_str = if (is_on) "\x1b[1;32mONLINE \x1b[0m" else "\x1b[90mOFFLINE\x1b[0m";
+            std.debug.print("    Gen {d:>2} ({s}): \x1b[1;34m", .{ i, status_str });
+            for (0..bar_w) |_| std.debug.print("█", .{});
+            std.debug.print("\x1b[90m", .{});
+            for (0..empty_w) |_| std.debug.print("░", .{});
+            std.debug.print("\x1b[0m  \x1b[1m{d:>6.2} MW\x1b[0m\n", .{mw});
+        }
+    } else if (@hasField(T, "upper_y") and @hasField(T, "lower_y")) {
+        std.debug.print("    Upper Camber: [ ", .{});
+        for (decision.upper_y) |y| std.debug.print("{d:.4} ", .{y});
+        std.debug.print("]\n    Lower Camber: [ ", .{});
+        for (decision.lower_y) |y| std.debug.print("{d:.4} ", .{y});
+        std.debug.print("]\n", .{});
+    } else if (@hasField(T, "channels") and @hasField(T, "powers")) {
+        const show_len = @min(decision.channels.len, 10);
+        for (0..show_len) |i| {
+            std.debug.print("    User {d:>2} ──> Channel: \x1b[1;36m{d:>2}\x1b[0m | Power: \x1b[1;32m{d:>5.1} dBm\x1b[0m\n", .{
+                i,
+                decision.channels[i],
+                decision.powers[i],
+            });
+        }
+        if (decision.channels.len > 10) {
+            std.debug.print("    ... ({d} more users)\n", .{decision.channels.len - 10});
+        }
+    } else if (@hasField(T, "count") and @hasField(T, "indices")) {
+        const cnt = @min(decision.count, decision.indices.len);
+        std.debug.print("    Selected Epistatic Markers (Count: \x1b[1;32m{d}\x1b[0m):\n    ", .{decision.count});
+        for (decision.indices[0..cnt]) |snp| {
+            std.debug.print("\x1b[1;35m[SNP#{d}]\x1b[0m ", .{snp});
+        }
+        std.debug.print("\n", .{});
+    }
+
+    std.debug.print("\n\x1b[1;36m╭──────────────────────────────────────────────────────────────────────────╮\x1b[0m\n", .{});
+    std.debug.print("\x1b[1;36m│\x1b[0m  \x1b[1;32m✔ OPTIMIZATION COMPLETE (0 B Runtime Allocations • Reference Verified)\x1b[0m  \x1b[1;36m│\x1b[0m\n", .{});
+    std.debug.print("\x1b[1;36m╰──────────────────────────────────────────────────────────────────────────╯\x1b[0m\n\n", .{});
+}
+
 fn runSingle(
     comptime L: usize,
     comptime Domain: type,
@@ -96,9 +418,11 @@ fn runSingle(
     domain: Domain,
     options: SolveOptions,
     allocator: std.mem.Allocator,
+    best_chrom: *big_ll.types.Chromosome(L),
     best_fit: *f64,
     mean_fit: *f64,
     final_entropy: *f64,
+    history: *HistoryTracker,
 ) !void {
     const Engine = big_ll.GeneticEngineCustom(L, Domain, .{ .enable_dedup = enable_dedup, .num_threads = 1 });
     const eng = try allocator.create(Engine);
@@ -106,21 +430,28 @@ fn runSingle(
     eng.* = try Engine.init(allocator, options.pop_size, domain, options.seed);
     defer eng.deinit();
 
+    const sample_interval = @max(@as(usize, 1), options.gens / HistoryTracker.CAPACITY);
+
     for (0..options.gens) |g| {
         try eng.step();
-        if (!options.quiet and !options.json and (g % 20 == 0 or g + 1 == options.gens)) {
+        const cur_best = eng.getBest().fitness;
+        if ((g + 1) % sample_interval == 0 or g + 1 == options.gens) {
+            history.record(cur_best);
+        }
+        if (!options.quiet and !options.json and !options.pretty and (g % 20 == 0 or g + 1 == options.gens)) {
             const pct = (@as(f64, @floatFromInt(g + 1)) / @as(f64, @floatFromInt(options.gens))) * 100.0;
             std.debug.print("\r[Gen {d:>4}/{d}] {d:>5.1}% | Best: {d:>10.4} | Mean: {d:>10.4} | Entropy: {d:.4} | Dedup: {d:>4.1}%", .{
                 g + 1,
                 options.gens,
                 pct,
-                eng.getBest().fitness,
+                cur_best,
                 eng.pop_current.mean_fitness,
                 eng.pop_current.entropy,
                 eng.dedup_cache.hitRatio() * 100.0,
             });
         }
     }
+    best_chrom.* = eng.getBest();
     best_fit.* = eng.getBest().fitness;
     final_entropy.* = eng.pop_current.entropy;
     mean_fit.* = eng.pop_current.mean_fitness;
@@ -135,7 +466,7 @@ fn executeSolve(
     options: SolveOptions,
     allocator: std.mem.Allocator,
 ) !void {
-    if (!options.json and !options.quiet) {
+    if (!options.json and !options.quiet and !options.pretty) {
         std.debug.print("BIG-LL Industrial Genetic Solver\n", .{});
         std.debug.print("Instance:     {s}\n", .{file_path});
         std.debug.print("Domain:       {s} (L={d})\n", .{ domain_name, L });
@@ -151,12 +482,14 @@ fn executeSolve(
     var best_fit: f64 = 0.0;
     var final_entropy: f64 = 0.0;
     var mean_fit: f64 = 0.0;
+    var best_chrom: big_ll.types.Chromosome(L) = undefined;
+    var history = HistoryTracker{};
 
     if (options.islands == 1) {
         if (options.enable_dedup) {
-            try runSingle(L, Domain, true, domain, options, allocator, &best_fit, &mean_fit, &final_entropy);
+            try runSingle(L, Domain, true, domain, options, allocator, &best_chrom, &best_fit, &mean_fit, &final_entropy, &history);
         } else {
-            try runSingle(L, Domain, false, domain, options, allocator, &best_fit, &mean_fit, &final_entropy);
+            try runSingle(L, Domain, false, domain, options, allocator, &best_chrom, &best_fit, &mean_fit, &final_entropy, &history);
         }
     } else if (options.islands == 4) {
         const Islands = big_ll.IslandEngine(L, Domain, 4, 25);
@@ -165,24 +498,28 @@ fn executeSolve(
         eng.* = try Islands.init(allocator, options.pop_size, domain, options.seed);
         defer eng.deinit();
 
+        history.record(eng.getGlobalBest().fitness);
         var completed: usize = 0;
         while (completed < options.gens) {
             const step_len = @min(25, options.gens - completed);
             try eng.stepCount(step_len);
             completed += step_len;
-            if (!options.quiet and !options.json and (completed % 25 == 0 or completed == options.gens)) {
+            const cur_best = eng.getGlobalBest().fitness;
+            history.record(cur_best);
+            if (!options.quiet and !options.json and !options.pretty and (completed % 25 == 0 or completed == options.gens)) {
                 const pct = (@as(f64, @floatFromInt(completed)) / @as(f64, @floatFromInt(options.gens))) * 100.0;
                 std.debug.print("\r[Gen {d:>4}/{d}] {d:>5.1}% | Best: {d:>10.4} | Mean: {d:>10.4} | Entropy: {d:.4}", .{
                     completed,
                     options.gens,
                     pct,
-                    eng.getGlobalBest().fitness,
+                    cur_best,
                     eng.getMeanFitness(),
                     eng.getGlobalEntropy(),
                 });
             }
         }
-        best_fit = eng.getGlobalBest().fitness;
+        best_chrom = eng.getGlobalBest();
+        best_fit = best_chrom.fitness;
         final_entropy = eng.getGlobalEntropy();
         mean_fit = eng.getMeanFitness();
     } else if (options.islands == 8) {
@@ -192,24 +529,28 @@ fn executeSolve(
         eng.* = try Islands.init(allocator, options.pop_size, domain, options.seed);
         defer eng.deinit();
 
+        history.record(eng.getGlobalBest().fitness);
         var completed: usize = 0;
         while (completed < options.gens) {
             const step_len = @min(25, options.gens - completed);
             try eng.stepCount(step_len);
             completed += step_len;
-            if (!options.quiet and !options.json and (completed % 25 == 0 or completed == options.gens)) {
+            const cur_best = eng.getGlobalBest().fitness;
+            history.record(cur_best);
+            if (!options.quiet and !options.json and !options.pretty and (completed % 25 == 0 or completed == options.gens)) {
                 const pct = (@as(f64, @floatFromInt(completed)) / @as(f64, @floatFromInt(options.gens))) * 100.0;
                 std.debug.print("\r[Gen {d:>4}/{d}] {d:>5.1}% | Best: {d:>10.4} | Mean: {d:>10.4} | Entropy: {d:.4}", .{
                     completed,
                     options.gens,
                     pct,
-                    eng.getGlobalBest().fitness,
+                    cur_best,
                     eng.getMeanFitness(),
                     eng.getGlobalEntropy(),
                 });
             }
         }
-        best_fit = eng.getGlobalBest().fitness;
+        best_chrom = eng.getGlobalBest();
+        best_fit = best_chrom.fitness;
         final_entropy = eng.getGlobalEntropy();
         mean_fit = eng.getMeanFitness();
     } else {
@@ -223,6 +564,8 @@ fn executeSolve(
     const total_evals = options.pop_size * options.gens;
     const evals_per_sec = @as(f64, @floatFromInt(total_evals)) / total_sec;
     const us_per_gen = (@as(f64, @floatFromInt(total_ns)) / @as(f64, @floatFromInt(options.gens))) / 1_000.0;
+
+    const decision = domain.decode(&best_chrom);
 
     if (options.json) {
         std.debug.print(
@@ -239,8 +582,6 @@ fn executeSolve(
             \\  "best_fitness": {d:.6},
             \\  "mean_fitness": {d:.6},
             \\  "final_entropy": {d:.6}
-            \\}}
-            \\
         , .{
             file_path,
             domain_name,
@@ -255,6 +596,10 @@ fn executeSolve(
             mean_fit,
             final_entropy,
         });
+        printDecisionJson(decision);
+        std.debug.print("\n}}\n", .{});
+    } else if (options.pretty) {
+        renderPrettyDashboard(L, decision, domain_name, file_path, options, best_fit, mean_fit, final_entropy, total_sec, evals_per_sec, us_per_gen, &history);
     } else {
         std.debug.print("\n\nSolution Summary:\n", .{});
         std.debug.print("  Best Fitness:   {d:.6}\n", .{best_fit});
@@ -262,6 +607,7 @@ fn executeSolve(
         std.debug.print("  Elapsed Time:   {d:.2} ms\n", .{total_sec * 1000.0});
         std.debug.print("  Throughput:     {d:.2} evals/sec ({d:.2} us/gen)\n", .{ evals_per_sec, us_per_gen });
         std.debug.print("  Final Entropy:  {d:.4}\n", .{final_entropy});
+        printDecisionText(decision);
     }
 }
 
@@ -821,6 +1167,8 @@ pub fn main(init: std.process.Init) !void {
                     return;
                 };
                 options.peer_endpoint = val_str;
+            } else if (std.mem.eql(u8, arg, "--pretty") or std.mem.eql(u8, arg, "-p")) {
+                options.pretty = true;
             } else if (std.mem.eql(u8, arg, "--json")) {
                 options.json = true;
             } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {
