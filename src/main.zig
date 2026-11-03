@@ -49,6 +49,7 @@ fn printUsage() void {
         \\                                   --num-nodes <int> Total cluster node count (default: 1)
         \\                                   --peer <addr>     Peer node endpoint (for point-to-point mesh)
         \\                                   --pretty, -p      Enable rich visual terminal dashboard
+        \\                                   --plot, --svg <p> Export vector SVG convergence report
         \\                                   --json            Output results as JSON
         \\                                   --quiet, -q       Suppress interactive progress
         \\  inspect <file>                 Inspect a dataset (supports .bigd, .npy, .bed, .vrp, .csv, etc.)
@@ -81,6 +82,7 @@ pub const SolveOptions = struct {
     seed: u64 = 42,
     enable_dedup: bool = true,
     pretty: bool = false,
+    plot_path: ?[]const u8 = null,
     json: bool = false,
     quiet: bool = false,
     save_ir: ?[]const u8 = null,
@@ -411,6 +413,164 @@ fn renderPrettyDashboard(
     std.debug.print("\x1b[1;36m╰──────────────────────────────────────────────────────────────────────────╯\x1b[0m\n\n", .{});
 }
 
+fn writeAllFd(fd: std.posix.fd_t, data: []const u8) !void {
+    var total_written: usize = 0;
+    while (total_written < data.len) {
+        const rc = std.c.write(fd, data.ptr + total_written, data.len - total_written);
+        if (rc < 0) return error.WriteFailed;
+        total_written += @intCast(rc);
+    }
+}
+
+fn exportSvgDashboard(
+    out_path: []const u8,
+    comptime L: usize,
+    decision: anytype,
+    domain_name: []const u8,
+    file_path: []const u8,
+    options: SolveOptions,
+    best_fit: f64,
+    mean_fit: f64,
+    final_entropy: f64,
+    total_sec: f64,
+    evals_per_sec: f64,
+    history: *const HistoryTracker,
+    allocator: std.mem.Allocator,
+) void {
+    _ = L;
+    _ = mean_fit;
+    _ = final_entropy;
+    const path_z = allocator.dupeZ(u8, out_path) catch return;
+    defer allocator.free(path_z);
+
+    const fd = std.posix.openat(
+        std.posix.AT.FDCWD,
+        path_z,
+        .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true },
+        0o666,
+    ) catch |err| {
+        std.debug.print("error: failed to create plot file '{s}': {s}\n", .{ out_path, @errorName(err) });
+        return;
+    };
+    defer _ = std.c.close(fd);
+
+    var buf: [4096]u8 = undefined;
+
+    const min_fit = if (history.count > 0) history.min_fit else 0.0;
+    const max_fit = if (history.count > 0) history.max_fit else 1.0;
+    const range = @max(1e-6, max_fit - min_fit);
+
+    var s = std.fmt.bufPrint(&buf,
+        \\<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" width="100%" height="100%">
+        \\  <defs>
+        \\    <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+        \\      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.4"/>
+        \\      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.0"/>
+        \\    </linearGradient>
+        \\  </defs>
+        \\  <rect width="100%" height="100%" fill="#0a0e17" rx="12"/>
+        \\  <text x="40" y="45" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="20" font-weight="700" fill="#f8fafc">BIG-LL Industrial Genetic Solver — Convergence Report</text>
+        \\  <text x="40" y="70" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#94a3b8">Instance: {s} | Domain: {s} | Runtime: {d:.2} ms | Throughput: {d:.2} evals/sec</text>
+        \\  <rect x="40" y="90" width="720" height="200" rx="8" fill="#0f172a" stroke="#1e293b"/>
+        \\
+    , .{ file_path, domain_name, total_sec * 1000.0, evals_per_sec }) catch return;
+    writeAllFd(fd, s) catch return;
+
+    for (0..5) |row| {
+        const y = 110.0 + @as(f64, @floatFromInt(row)) * 40.0;
+        const val = max_fit - range * (@as(f64, @floatFromInt(row)) / 4.0);
+        s = std.fmt.bufPrint(&buf,
+            \\  <line x1="100" y1="{d:.1}" x2="740" y2="{d:.1}" stroke="#1e293b" stroke-dasharray="4"/>
+            \\  <text x="90" y="{d:.1}" font-family="monospace" font-size="11" fill="#64748b" text-anchor="end">{d:.4}</text>
+            \\
+        , .{ y, y, y + 4.0, val }) catch return;
+        writeAllFd(fd, s) catch return;
+    }
+
+    if (history.count > 1) {
+        s = std.fmt.bufPrint(&buf, "  <polyline fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"3\" points=\"", .{}) catch return;
+        writeAllFd(fd, s) catch return;
+        for (history.samples[0..history.count], 0..) |fit, i| {
+            const x = 120.0 + (@as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(history.count - 1))) * 600.0;
+            const norm = (fit - min_fit) / range;
+            const y = 270.0 - norm * 160.0;
+            s = std.fmt.bufPrint(&buf, "{d:.1},{d:.1} ", .{ x, y }) catch return;
+            writeAllFd(fd, s) catch return;
+        }
+        s = std.fmt.bufPrint(&buf, "\"/>\n", .{}) catch return;
+        writeAllFd(fd, s) catch return;
+    }
+
+    s = std.fmt.bufPrint(&buf,
+        \\  <rect x="40" y="310" width="720" height="170" rx="8" fill="#0f172a" stroke="#1e293b"/>
+        \\  <text x="60" y="335" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="14" font-weight="600" fill="#38bdf8">Decoded Decision Blueprint (Best Fitness: {d:.6})</text>
+        \\
+    , .{best_fit}) catch return;
+    writeAllFd(fd, s) catch return;
+
+    const T = @TypeOf(decision);
+    if (@hasField(T, "weights") and @hasField(T, "rules")) {
+        var sum: f64 = 0.0;
+        for (decision.weights) |w| sum += w;
+        const inv_sum = if (sum > 1e-6) 1.0 / sum else 0.0;
+        const max_show = @min(decision.weights.len, 6);
+        for (decision.weights[0..max_show], 0..) |w, i| {
+            const norm_w = w * inv_sum;
+            const y = 360.0 + @as(f64, @floatFromInt(i)) * 18.0;
+            const bar_w = @min(200.0, norm_w * 200.0);
+            s = std.fmt.bufPrint(&buf,
+                \\  <text x="60" y="{d:.1}" font-family="monospace" font-size="11" fill="#94a3b8">Asset {d:>2}</text>
+                \\  <rect x="130" y="{d:.1}" width="{d:.1}" height="10" rx="3" fill="#10b981"/>
+                \\  <text x="{d:.1}" y="{d:.1}" font-family="monospace" font-size="11" fill="#f8fafc">{d:>5.1}%</text>
+                \\
+            , .{ y, i, y - 9.0, bar_w, 140.0 + bar_w, y, norm_w * 100.0 }) catch return;
+            writeAllFd(fd, s) catch return;
+        }
+    } else if (@typeInfo(T) == .array) {
+        s = std.fmt.bufPrint(&buf,
+            \\  <text x="60" y="365" font-family="monospace" font-size="12" fill="#f8fafc">Vehicle Routing Stops ({d} customers):</text>
+            \\  <text x="60" y="390" font-family="monospace" font-size="11" fill="#38bdf8">[Depot] ──&gt; [{d}] ──&gt; [{d}] ──&gt; [{d}] ──&gt; [{d}] ──&gt; [{d}] ──&gt; ... ──&gt; [Depot]</text>
+            \\
+        , .{ decision.len, decision[0], decision[1], decision[2], decision[3], decision[4] }) catch return;
+        writeAllFd(fd, s) catch return;
+    } else if (@hasField(T, "count") and @hasField(T, "indices")) {
+        const c_show = @min(decision.count, @min(decision.indices.len, 5));
+        s = std.fmt.bufPrint(&buf,
+            \\  <text x="60" y="365" font-family="monospace" font-size="12" fill="#f8fafc">Selected Epistatic Biomarkers ({d} markers):</text>
+            \\
+        , .{decision.count}) catch return;
+        writeAllFd(fd, s) catch return;
+
+        var x_off: f64 = 60.0;
+        for (decision.indices[0..c_show]) |snp| {
+            s = std.fmt.bufPrint(&buf,
+                \\  <rect x="{d:.1}" y="380" width="70" height="22" rx="4" fill="#6366f1"/>
+                \\  <text x="{d:.1}" y="395" font-family="monospace" font-size="11" fill="#ffffff">SNP#{d}</text>
+                \\
+            , .{ x_off, x_off + 10.0, snp }) catch return;
+            writeAllFd(fd, s) catch return;
+            x_off += 80.0;
+        }
+    } else {
+        s = std.fmt.bufPrint(&buf,
+            \\  <text x="60" y="365" font-family="monospace" font-size="12" fill="#f8fafc">Optimization converged successfully.</text>
+            \\
+        , .{}) catch return;
+        writeAllFd(fd, s) catch return;
+    }
+
+    s = std.fmt.bufPrint(&buf,
+        \\  <text x="740" y="500" font-family="monospace" font-size="10" fill="#475569" text-anchor="end">0 B Runtime Heap Allocation • Reference-as-Truth</text>
+        \\</svg>
+        \\
+    , .{}) catch return;
+    writeAllFd(fd, s) catch return;
+
+    if (!options.quiet) {
+        std.debug.print("Vector SVG dashboard exported to: {s}\n", .{out_path});
+    }
+}
+
 fn runSingle(
     comptime L: usize,
     comptime Domain: type,
@@ -608,6 +768,10 @@ fn executeSolve(
         std.debug.print("  Throughput:     {d:.2} evals/sec ({d:.2} us/gen)\n", .{ evals_per_sec, us_per_gen });
         std.debug.print("  Final Entropy:  {d:.4}\n", .{final_entropy});
         printDecisionText(decision);
+    }
+
+    if (options.plot_path) |plot_p| {
+        exportSvgDashboard(plot_p, L, decision, domain_name, file_path, options, best_fit, mean_fit, final_entropy, total_sec, evals_per_sec, &history, allocator);
     }
 }
 
@@ -1169,6 +1333,12 @@ pub fn main(init: std.process.Init) !void {
                 options.peer_endpoint = val_str;
             } else if (std.mem.eql(u8, arg, "--pretty") or std.mem.eql(u8, arg, "-p")) {
                 options.pretty = true;
+            } else if (std.mem.eql(u8, arg, "--plot") or std.mem.eql(u8, arg, "--svg")) {
+                const val_str = it.next() orelse {
+                    std.debug.print("error: --plot requires an output SVG path argument\n", .{});
+                    return;
+                };
+                options.plot_path = val_str;
             } else if (std.mem.eql(u8, arg, "--json")) {
                 options.json = true;
             } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {
