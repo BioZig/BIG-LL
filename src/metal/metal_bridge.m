@@ -1,9 +1,31 @@
 // Apple Silicon Dedicated Metal GPU Batch Acceleration Objective-C / Metal Bridge
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#import <os/signpost.h>
+#import <os/log.h>
 #include "metal_bridge.h"
 #include <stdlib.h>
 #include <string.h>
+
+static os_log_t s_bigll_log = NULL;
+
+void bigll_signpost_init(void) {
+    if (!s_bigll_log) {
+        s_bigll_log = os_log_create("com.apple.bigll", "ComputeEngine");
+    }
+}
+
+void bigll_signpost_interval_begin(const char* name, uint64_t id) {
+    if (!s_bigll_log) bigll_signpost_init();
+    os_signpost_id_t sid = (os_signpost_id_t)(id != 0 ? id : 1);
+    os_signpost_interval_begin(s_bigll_log, sid, "BIG-LL Workload", "%{public}s", name ? name : "task");
+}
+
+void bigll_signpost_interval_end(const char* name, uint64_t id) {
+    if (!s_bigll_log) return;
+    os_signpost_id_t sid = (os_signpost_id_t)(id != 0 ? id : 1);
+    os_signpost_interval_end(s_bigll_log, sid, "BIG-LL Workload", "%{public}s", name ? name : "task");
+}
 
 static const char* kBigLLMetalShaderSource =
 "#include <metal_stdlib>\n"
@@ -312,7 +334,9 @@ bool bigll_metal_eval_onemax(
         }
 
         id<MTLCommandBuffer> cmd_buf = [ctx->command_queue commandBuffer];
+        cmd_buf.label = @"BIG-LL OneMax GPU Eval";
         id<MTLComputeCommandEncoder> encoder = [cmd_buf computeCommandEncoder];
+        encoder.label = @"OneMax Parallel Kernel";
 
         [encoder setComputePipelineState:ctx->onemax_pipeline];
         [encoder setBuffer:ctx->shared_chrom_buf offset:0 atIndex:0];
@@ -329,8 +353,10 @@ bool bigll_metal_eval_onemax(
         [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
         [encoder endEncoding];
 
+        bigll_signpost_interval_begin("Metal OneMax Eval", pop_size);
         [cmd_buf commit];
         [cmd_buf waitUntilCompleted];
+        bigll_signpost_interval_end("Metal OneMax Eval", pop_size);
 
         if (fitness_out != [ctx->shared_fit_buf contents]) {
             memcpy(fitness_out, [ctx->shared_fit_buf contents], fit_bytes);
@@ -368,7 +394,9 @@ bool bigll_metal_eval_finance(
         memcpy([ctx->finance_cov_buf contents], cov_matrix, num_assets * num_assets * sizeof(float));
 
         id<MTLCommandBuffer> cmd_buf = [ctx->command_queue commandBuffer];
+        cmd_buf.label = @"BIG-LL Finance Markowitz QP";
         id<MTLComputeCommandEncoder> encoder = [cmd_buf computeCommandEncoder];
+        encoder.label = @"Finance QP Kernel";
 
         [encoder setComputePipelineState:ctx->finance_pipeline];
         [encoder setBuffer:ctx->shared_chrom_buf offset:0 atIndex:0];
@@ -387,8 +415,10 @@ bool bigll_metal_eval_finance(
         [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
         [encoder endEncoding];
 
+        bigll_signpost_interval_begin("Metal Finance QP Eval", pop_size);
         [cmd_buf commit];
         [cmd_buf waitUntilCompleted];
+        bigll_signpost_interval_end("Metal Finance QP Eval", pop_size);
 
         if (fitness_out != [ctx->shared_fit_buf contents]) {
             memcpy(fitness_out, [ctx->shared_fit_buf contents], fit_bytes);
@@ -433,6 +463,7 @@ bool bigll_metal_evolve_finance(
         MTLSize threadgroupSize = MTLSizeMake(threadGroupSize, 1, 1);
 
         id<MTLCommandBuffer> cmd_buf = [ctx->command_queue commandBuffer];
+        cmd_buf.label = @"BIG-LL Metal Full Evolution";
 
         // Generation 0 initial evaluation
         {
@@ -489,8 +520,10 @@ bool bigll_metal_evolve_finance(
             next_pop = tmp;
         }
 
+        bigll_signpost_interval_begin("Metal Evolve Loop", num_generations);
         [cmd_buf commit];
         [cmd_buf waitUntilCompleted];
+        bigll_signpost_interval_end("Metal Evolve Loop", num_generations);
 
         if (best_fitness_out) {
             const float* fits = (const float*)[ctx->shared_fit_buf contents];

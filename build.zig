@@ -43,6 +43,13 @@ pub fn build(b: *std.Build) void {
         .root_module = core_mod,
     });
     b.installArtifact(lib);
+
+    const dylib = b.addLibrary(.{
+        .linkage = .dynamic,
+        .name = "big_ll",
+        .root_module = core_mod,
+    });
+    b.installArtifact(dylib);
     b.installFile("include/big_ll.h", "include/big_ll.h");
 
     const run_step = b.step("run", "Run BIG-LL CLI");
@@ -77,6 +84,7 @@ pub fn build(b: *std.Build) void {
         "tests/test_block_chromosome.zig",
         "tests/test_distributed.zig",
         "tests/test_bucket_shapes.zig",
+        "tests/test_zero_allocation.zig",
     };
 
     for (test_files) |path| {

@@ -9,6 +9,9 @@ pub const pool = @import("core/pool.zig");
 pub const pareto = @import("core/pareto.zig");
 pub const shm = @import("ipc/shm.zig");
 pub const c_api = @import("ipc/c_api.zig");
+comptime {
+    _ = c_api;
+}
 pub const distributed = @import("ipc/distributed.zig");
 pub const data_format = @import("data/format.zig");
 pub const data_loader = @import("data/loader.zig");

@@ -51,16 +51,25 @@ pub fn IslandEngine(
             self.generation = 0;
             self.thread_pool = p;
 
-            // Heterogeneous asymmetric allocation: 72% total to Firestorm P-cores (18% per island), 28% total to Icestorm E-cores (7% per island)
+            // Heterogeneous asymmetric allocation:
+            // Proportional weighting between P-cores and E-cores based on measured IPC and clock frequency ratio (~2.57x)
+            const topo = pool.CpuTopology.get();
+            const p_islands = @min(num_islands, topo.p_cores);
+            const e_islands = num_islands - p_islands;
+            const use_heterogeneous = topo.is_heterogeneous and e_islands > 0;
+
+            // Scaled weights: P-core = 257, E-core = 100
+            const total_weight: usize = if (use_heterogeneous)
+                (@as(usize, p_islands) * 257 + @as(usize, e_islands) * 100)
+            else
+                num_islands;
+
             var actual_total: usize = 0;
             for (0..num_islands) |i| {
                 var isl_pop = sub_pop;
-                if (num_islands == 8) {
-                    if (i < 4) {
-                        isl_pop = (total_pop_size * 18) / 100; // 18% per P-island (72% total across 4 P-cores)
-                    } else {
-                        isl_pop = (total_pop_size * 7) / 100;  // 7% per E-island (28% total across 4 E-cores)
-                    }
+                if (use_heterogeneous) {
+                    const weight: usize = if (i < p_islands) 257 else 100;
+                    isl_pop = (total_pop_size * weight) / total_weight;
                     isl_pop = @max(isl_pop, SubEngine.elite_size);
                 }
                 actual_total += isl_pop;

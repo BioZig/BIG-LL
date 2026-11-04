@@ -14,3 +14,12 @@ Thumbs.db
 
 # Generated export plots
 *.svg
+
+# Swift package manager
+.build/
+*.xcodeproj
+.swiftpm/
+
+# Profiling traces
+profiles/
+*.trace/

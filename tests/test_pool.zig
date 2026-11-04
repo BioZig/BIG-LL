@@ -37,3 +37,13 @@ test "StaticThreadPool multi-worker parallel dispatches" {
         try std.testing.expectEqual(@as(usize, 100), ctx.slots[i]);
     }
 }
+
+test "CpuTopology dynamic detection" {
+    const topo = big_ll.pool.CpuTopology.get();
+    try std.testing.expect(topo.total_physical >= 1);
+    try std.testing.expect(topo.p_cores >= 1);
+    if (topo.is_heterogeneous) {
+        try std.testing.expect(topo.e_cores >= 1);
+        try std.testing.expectEqual(topo.total_physical, topo.p_cores + topo.e_cores);
+    }
+}

@@ -70,6 +70,11 @@ bool bigll_metal_evolve_finance(
     float* best_fitness_out
 );
 
+// Apple Silicon os_signpost instrumentation for Xcode Instruments profiling
+void bigll_signpost_init(void);
+void bigll_signpost_interval_begin(const char* name, uint64_t id);
+void bigll_signpost_interval_end(const char* name, uint64_t id);
+
 #ifdef __cplusplus
 }
 #endif

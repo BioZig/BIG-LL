@@ -2,13 +2,67 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 extern "c" fn pthread_set_qos_class_self_np(qos_class: c_uint, relative_priority: c_int) c_int;
+extern "c" fn sysctlbyname(
+    name: [*:0]const u8,
+    oldp: ?*anyopaque,
+    oldlenp: ?*usize,
+    newp: ?*const anyopaque,
+    newlen: usize,
+) c_int;
+
+pub const CpuTopology = struct {
+    total_physical: usize,
+    p_cores: usize,
+    e_cores: usize,
+    is_heterogeneous: bool,
+
+    var cached: ?CpuTopology = null;
+
+    pub fn get() CpuTopology {
+        if (cached) |topo| return topo;
+
+        var topo = CpuTopology{
+            .total_physical = 1,
+            .p_cores = 1,
+            .e_cores = 0,
+            .is_heterogeneous = false,
+        };
+
+        if (builtin.os.tag.isDarwin()) {
+            var p_count: u32 = 0;
+            var len: usize = @sizeOf(u32);
+            if (sysctlbyname("hw.perflevel0.physicalcpu", &p_count, &len, null, 0) == 0 and p_count > 0) {
+                topo.p_cores = p_count;
+                var e_count: u32 = 0;
+                len = @sizeOf(u32);
+                if (sysctlbyname("hw.perflevel1.physicalcpu", &e_count, &len, null, 0) == 0) {
+                    topo.e_cores = e_count;
+                }
+                topo.total_physical = topo.p_cores + topo.e_cores;
+                topo.is_heterogeneous = (topo.e_cores > 0 and topo.p_cores > 0);
+                cached = topo;
+                return topo;
+            }
+        }
+
+        const cpus = std.Thread.getCpuCount() catch 1;
+        topo.total_physical = cpus;
+        topo.p_cores = cpus;
+        topo.e_cores = 0;
+        topo.is_heterogeneous = false;
+        cached = topo;
+        return topo;
+    }
+};
 
 // Architecture-Aware Thread Pinning:
-// - Apple Silicon (macOS): QoS Class Pinning (QOS_CLASS_USER_INTERACTIVE to lock to Firestorm P-Cores)
+// - Apple Silicon (macOS): Dynamic QoS Class Pinning based on discovered P-core count.
+//   (QOS_CLASS_USER_INTERACTIVE for Firestorm P-Cores, QOS_CLASS_UTILITY for Icestorm E-Cores)
 // - Linux Server: Core Affinity Pinning (sched_setaffinity to avoid cross-NUMA interconnect overhead)
 pub fn setWorkerQoSAffinity(worker_id: usize) void {
     if (builtin.os.tag == .macos or builtin.os.tag == .ios or builtin.os.tag == .watchos or builtin.os.tag == .tvos) {
-        if (worker_id < 4) {
+        const topo = CpuTopology.get();
+        if (worker_id < topo.p_cores) {
             _ = pthread_set_qos_class_self_np(0x21, 0); // QOS_CLASS_USER_INTERACTIVE (Firestorm P-Cores)
         } else {
             _ = pthread_set_qos_class_self_np(0x11, 0); // QOS_CLASS_UTILITY (Icestorm E-Cores)

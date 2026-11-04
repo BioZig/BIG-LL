@@ -22,11 +22,17 @@ jobs:
       - name: Build Core Engine & Executables
         run: zig build -Doptimize=ReleaseFast
 
-      - name: Run Unit & Integration Tests (83 Tests)
+      - name: Run Unit & Integration Tests (100 Tests)
         run: zig build test --summary all
 
       - name: Verify Zero-Allocation Invariant (Memory Audit)
         run: zig build bench-mem
+
+      - name: Build & Test Swift Native Bindings
+        run: |
+          cd bindings/swift
+          swift test
+          swift run BigLLExample
 
       - name: Run Dedicated Metal GPU Benchmark
         run: zig build bench-metal
