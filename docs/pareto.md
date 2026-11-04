@@ -30,6 +30,6 @@ The `pareto.zig` module provides non-dominated sorting and crowding distance cal
 
 5. **`ParetoEngine(comptime L: usize, comptime M: usize, comptime Adapter: type)`**:
    * Pre-allocates double buffers for parent and offspring populations (`pop_current`, `pop_next`).
-   * Crowded tournament selection: selects based on $\text{rank}(a) < \text{rank}(b)$, breaking ties with $\text{crowding\_distance}(a) > \text{crowding\_distance}(b)$.
+   * Crowded tournament selection: selects based on `rank(a) < rank(b)`, breaking ties with `crowding_distance(a) > crowding_distance(b)`.
    * Dynamic mutation and crossover operators applied across generations.
    * Zero heap allocations occur in generational inner loops outside rank sort partitions.

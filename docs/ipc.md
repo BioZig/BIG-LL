@@ -31,11 +31,15 @@ The `ipc` module provides zero-copy inter-process communication (IPC) and a stan
 
 ## 2. Shared Memory Layout
 
-$$\begin{aligned}
-[0 \dots 127]: & \quad \text{SharedPopulationHeader} \quad (\text{Magic } 0x4249474C, \text{ Version } 1, \dots) \\
-[128 \dots \text{fitness\_offset}-1]: & \quad \text{Chromosome Genes Data } (N \times W \times 8 \text{ bytes}) \\
-[\text{fitness\_offset} \dots \text{end}]: & \quad \text{Fitness Array } (N \times 8 \text{ bytes}, \text{f64})
-\end{aligned}$$
+```text
++---------------------------+---------------------------------------------------+
+| Byte Offset Range         | Segment Description                               |
++---------------------------+---------------------------------------------------+
+| 0 .. 127                  | SharedPopulationHeader (Magic 0x4249474C, Ver 1)  |
+| 128 .. fitness_offset - 1 | Chromosome Genes Data (N * W * 8 bytes)           |
+| fitness_offset .. end     | Fitness Array (N * 8 bytes, f64)                  |
++---------------------------+---------------------------------------------------+
+```
 
 where:
 * $N = \text{pop\_size}$

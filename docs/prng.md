@@ -19,8 +19,10 @@ The `prng.zig` module implements an in-register Xoshiro256++ (xor/shift/rotate) 
 * `uintLessThan(bound: usize) usize`: Bounded integer generation using modulo reduction.
 * `fillWords(words: []u64) void`: Fills memory slice with 64-bit random words for bulk crossover masks.
 * `sparseMask(depth: u3) u64`: Generates sparse mutation bitmasks via logical AND intersections:
-  $$\text{Mask} = \bigwedge_{k=1}^{\text{depth}} \text{next}()$$
-  * Density at `depth = 1`: $50.0\%$ (Uniform Crossover).
-  * Density at `depth = 4`: $6.25\%$.
-  * Density at `depth = 6`: $1.5625\%$ ($\approx 1/64$ bits set; average 1 bit flip per 64-bit word).
+  ```text
+  Mask = AND_{k=1..depth} next()
+  ```
+  * Density at `depth = 1`: 50.0% (Uniform Crossover).
+  * Density at `depth = 4`: 6.25%.
+  * Density at `depth = 6`: 1.5625% (~1/64 bits set; average 1 bit flip per 64-bit word).
 * `fillSparseWords(words: []u64, depth: u3) void`: In-place generation of mutation vectors across arbitrary word counts.

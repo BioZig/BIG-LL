@@ -23,7 +23,10 @@ The `engine.zig` module implements the top-level evolutionary orchestration pipe
 4. **Entropy-Triggered Adaptive Mutation:**
    * Inspects `pop_current.entropy` against threshold `entropy_floor` (default 0.15).
    * Dynamically alters mutation bit-depth:
-     $$\text{depth} = \begin{cases} 4 & \text{if } H(t) < H_{\text{floor}} \ (\text{elevated diversity injection: } (0.5)^4 = 6.25\% \text{ bit-flip}) \\ 5 & \text{if } H(t) \ge H_{\text{floor}} \ (\text{standard sparse perturbation: } (0.5)^5 = 3.125\% \text{ bit-flip}) \end{cases}$$
+     ```text
+     depth = 4  if H(t) < H_floor  (diversity injection: (0.5)^4 = 6.25% bit-flip)
+     depth = 5  if H(t) >= H_floor (standard perturbation: (0.5)^5 = 3.125% bit-flip)
+     ```
 
 5. **Offspring Production Loop:**
    * Tournament selection of size 2 ($k=2$) identifies parents $p_1, p_2$.

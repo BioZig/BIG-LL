@@ -19,12 +19,20 @@ Command flags (`command`) and completion flags (`done`) reside on isolated 64-by
 
 ### Lock-Free Signaling Protocol
 Workers idle-wait using acquire-release atomic load/store semantics without kernel futex round-trips:
-* Idle loop:
-  $$\text{spin on } @\text{atomicLoad}(u32, \&\text{worker.command}, .acquire)$$
-* Main thread task publication: Writes task context and function pointers, followed by atomic release:
-  $$@\text{atomicStore}(u32, \&\text{worker.command}, 1, .release)$$
-* Worker completion publication:
-  $$@\text{atomicStore}(u32, \&\text{worker.done}, 1, .release)$$
+* Worker spin loop:
+  ```zig
+  while (@atomicLoad(u32, &worker.command, .acquire) == 0) {
+      std.atomic.spinLoopHint();
+  }
+  ```
+* Main thread dispatch:
+  ```zig
+  @atomicStore(u32, &worker.command, 1, .release);
+  ```
+* Worker completion signal:
+  ```zig
+  @atomicStore(u32, &worker.done, 1, .release);
+  ```
 * Direct primary dispatch: The calling thread executes worker slot 0 directly, eliminating dispatch latency for the first partition.
 * Zero runtime heap allocations during `dispatch()`.
 

@@ -7,18 +7,21 @@ The `dedup.zig` module provides an $O(1)$ direct-mapped evaluation ring cache de
 ### Algorithmic Pipeline
 
 1. **Power-of-Two Ring Addressing:**
-   * Cache capacity $N = 2^k$ (default: 8,192 slots).
+   * Cache capacity `N = 2^k` (default: 8,192 slots).
    * Slot indexing via single bitwise AND:
-     $$\text{slot\_index} = \text{hash} \ \& \ (N - 1)$$
+     ```text
+     slot_index = hash & (N - 1)
+     ```
 
-2. **Murmur-Inspired 64-Bit Avalanche Hash:**
-   * Ingests 64-bit aligned chromosome word slice $\mathbf{w} \in \mathbb{N}^{W}$.
+2. **64-Bit Avalanche Hash:**
+   * Ingests 64-bit aligned chromosome word slice `words[0..W]`.
    * Initial seed: `0x517cc1b727220a95`.
    * Word mixing:
-     $$h \leftarrow (h \oplus w_i) \lll 31 \times \mu_1$$
-   * Final avalanche mixing stages:
-     $$h \leftarrow h \oplus (h \gg 33) \times \mu_2 \dots$$
-   * Ensures $> 16$-bit flip divergence for single-bit chromosome alterations.
+     ```text
+     h = rotl(h ^ word_i, 31) * M1
+     h = (h ^ (h >> 33)) * M2
+     ```
+   * Enforces > 16-bit flip divergence for single-bit chromosome alterations.
 
 3. **Direct-Mapped Slot Overwrite:**
    * Slot layout: `struct { hash: u64, fitness: f64, valid: bool }`.
@@ -28,7 +31,7 @@ The `dedup.zig` module provides an $O(1)$ direct-mapped evaluation ring cache de
 
 4. **Telemetry:**
    * Tracks discrete hit and miss counters.
-   * `hitRatio()` returns $\frac{\text{hits}}{\text{hits} + \text{misses}}$.
+   * `hitRatio()` returns `hits / (hits + misses)`.
 
 ### Memory Footprint
 

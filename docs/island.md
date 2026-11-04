@@ -11,15 +11,22 @@ The `island.zig` module implements an island-parallel evolutionary framework `Is
    * Each sub-population resides entirely within the private L1/L2 cache blocks of its assigned core.
 
 2. **Thread-Local Generational Execution:**
-   * During an epoch of length $E = \text{migration\_interval}$ generations, each island thread iterates uninterrupted:
-     $$\text{for } t \in [0, E) : \text{island}_m.\text{step}()$$
+   * During an epoch of length `E = migration_interval` generations, each island thread iterates uninterrupted:
+     ```text
+     for t in [0, E):
+         island[m].step()
+     ```
    * Zero shared memory accesses, zero lock contention, and zero atomic operations occur in the generational loop.
 
 3. **Synchronous Ring Migration:**
-   * At epoch completion ($G \equiv 0 \pmod E$), islands synchronize and export their top $C$ elites into a pre-allocated migration buffer:
-     $$\mathcal{B}[m] \leftarrow \text{top } C \text{ chromosomes of island } m$$
+   * At epoch completion (`G % E == 0`), islands synchronize and export their top `C` elites into a pre-allocated migration buffer:
+     ```text
+     B[m] <- top C chromosomes of island m
+     ```
    * Unidirectional ring exchange routes elites:
-     $$\text{island}_m \text{ receives } \mathcal{B}[(m + M - 1) \bmod M]$$
+     ```text
+     island[m] receives B[(m + M - 1) % M]
+     ```
    * Incoming elites replace the lowest-fitness individuals in `pop_current` if the incoming fitness strictly exceeds the local minimum.
    * Island metrics are recalculated and the next epoch initiates.
 

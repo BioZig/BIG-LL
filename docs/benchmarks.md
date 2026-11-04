@@ -20,8 +20,8 @@ The `bench_throughput.zig` benchmark quantifies execution throughput, generation
 
 | Metric | Measured Value | Notes |
 | :--- | :--- | :--- |
-| **Throughput** | **1,753,384 evals / sec** | $> 1.75$ Million evaluations per second |
-| **Generational Latency** | **146.00 $\mu$s / generation** | Complete evolutionary cycle including linkage & selection |
+| **Throughput** | **1,753,384 evals / sec** | > 1.75 Million evaluations per second |
+| **Generational Latency** | **146.00 us / generation** | Complete evolutionary cycle including linkage & selection |
 | **Initialization Time** | **0.09 ms** | Setup of dual-slab arena and L1 dedup table |
 | **L1-DEDUP Hit Ratio** | Tracked online | Filters redundant duplicate evaluations |
 | **Heap Allocations in Loop** | **0 bytes** | Zero dynamic heap allocations during generation loop |

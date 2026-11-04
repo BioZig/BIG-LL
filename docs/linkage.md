@@ -20,7 +20,10 @@ The `linkage.zig` module implements the Bitsliced Information-Geometric Linkage 
 
 4. **Batch Co-occurrence Evaluation & Scaled Integer Pipeline:**
    For each batch tile $b \in [0, X-1]$:
-   * Evaluate joint occurrences $C_{ij} = \sum_{w=0}^{W_K-1} \text{@popCount}(\mathbf{v}_i[w] \ \& \ \mathbf{v}_j[w])$.
+   * Evaluate joint occurrences:
+     ```text
+     C_ij = sum_{w=0}^{W_K-1} @popCount(v_i[w] & v_j[w])
+     ```
    * **Pure Scaled Integer Linkage:**
      To eliminate multi-cycle floating-point divisions (`fdiv`) and integer-to-float conversions in the $O(L^2)$ locus loop, the comparison is multiplied by $K$:
      $$\Delta_{\text{scaled}} = \left| K \cdot C_{ij} - \text{pop}(\mathbf{v}_i) \cdot \text{pop}(\mathbf{v}_j) \right|$$

@@ -85,7 +85,9 @@ $L = 128$ bits ($N = 128$ candidate loci).
 Bitboard extraction utilizes compiler intrinsic hardware trailing zero count (`@ctz`) to unpack active loci indices directly into registers in $O(|S|)$ operations without traversing unselected loci.
 
 ### Objective Function
-$$\text{Score} = \sum_{i \in S} w_i + 15.0 \sum_{(i,j) \in \mathcal{E}} \mathbb{I}(i, j \in S) + 35.0 \cdot \mathbb{I}(7, 42, 99 \in S) - \text{Penalty}(|S| > 12)$$
+```text
+Score = sum_{i in S} w_i + 15.0 * sum_{(i,j) in E} 1(i, j in S) + 35.0 * 1(7, 42, 99 in S) - Penalty(|S| > 12)
+```
 
 ## 6. Algorithmic Trading & Portfolio Allocation (`finance.zig`)
 
@@ -130,7 +132,7 @@ BIG-LL resolves this via **Hardware-Aligned Bucket Ceiling Quantization**. Rathe
 * **Telecom**: $N_{\text{bucket}} \in \{8, 16, 32, 64\}$
 
 ### Mechanics of Runtime Shape Adaptation
-1. **Header Inspection**: At startup, `cmdSolve` reads the exact entity count $N = \text{param\_u32\_0}$ from the 128-byte `.bigd` header.
+1. **Header Inspection**: At startup, `cmdSolve` reads the exact entity count `N = header.param_u32_0` from the 128-byte `.bigd` header.
 2. **Ceiling Tier Selection**: The CLI dispatches the problem to the smallest bucket capacity $C$ such that $N \le C$ (e.g., $N = 47$ customers selects the $C = 64$ bucket).
 3. **Active Count Masking & Decoding**:
    - The domain struct records `actual_customers = N`.
