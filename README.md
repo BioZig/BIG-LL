@@ -101,7 +101,7 @@ Decouples bitsliced chromosome words from problem domains via zero-heap decoders
 # Build release executable
 zig build -Doptimize=ReleaseFast
 
-# Run all 98 unit and integration tests
+# Run all 100 unit and integration tests
 zig build test --summary all
 
 # Verify 0 B runtime heap allocation invariant
@@ -109,6 +109,18 @@ zig build bench-mem
 
 # Run automated reproduction benchmark suite
 bash run_all_benchmarks.sh
+```
+
+---
+
+## Swift Native Package
+
+Native Swift bindings with C-ABI bridging are available in [`bindings/swift/`](bindings/swift):
+
+```bash
+cd bindings/swift
+swift test
+swift run BigLLExample
 ```
 
 ---
