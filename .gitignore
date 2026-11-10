@@ -14,6 +14,12 @@ Thumbs.db
 
 # Generated export plots
 *.svg
+*.png
+*.jpeg
+
+# Tex and manuscript files (manuscript or internal docs)
+*.tex
+*.pdf
 
 # Swift package manager
 .build/
@@ -23,3 +29,5 @@ Thumbs.db
 # Profiling traces
 profiles/
 *.trace/
+*.log
+
