@@ -8,8 +8,8 @@ on:
 
 jobs:
   macos-apple-silicon:
-    name: macOS Apple Silicon (M1/M2)
-    runs-on: macos-14
+    name: macOS Apple Silicon (M-Series)
+    runs-on: macos-15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
