@@ -1,3 +1,4 @@
+// Created by Sulkysubject37
 const std = @import("std");
 
 pub inline fn binaryToGray(b: u64) u64 {

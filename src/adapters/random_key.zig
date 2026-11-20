@@ -1,3 +1,4 @@
+// Created by Sulkysubject37
 const std = @import("std");
 const gray = @import("gray_code.zig");
 

@@ -1,3 +1,4 @@
+// Created by Sulkysubject37
 // Apple Silicon Dedicated Metal GPU Batch Acceleration C-ABI Bridge
 #ifndef BIGLL_METAL_BRIDGE_H
 #define BIGLL_METAL_BRIDGE_H

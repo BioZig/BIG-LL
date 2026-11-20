@@ -1,3 +1,4 @@
+// Created by Sulkysubject37
 const std = @import("std");
 
 pub const Magic: u32 = 0x42494744; // "BIGD"

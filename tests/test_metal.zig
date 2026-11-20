@@ -1,3 +1,4 @@
+// Created by Sulkysubject37
 // Apple Silicon Dedicated Metal GPU Batch Acceleration Test Suite
 const std = @import("std");
 const big_ll = @import("big_ll");

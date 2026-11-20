@@ -1,3 +1,4 @@
+// Created by Sulkysubject37
 // Apple Silicon Dedicated Metal GPU Batch Acceleration Benchmark
 const std = @import("std");
 const builtin = @import("builtin");

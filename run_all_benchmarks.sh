@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Created by Sulkysubject37
 # BIG-LL Automated Verification and Full Benchmark Suite
 # Target Architecture: Apple Silicon M-Series SoC (Firestorm/Icestorm + Metal UMA)
 set -euo pipefail
