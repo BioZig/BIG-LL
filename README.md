@@ -159,3 +159,46 @@ Options:
 # Compile raw problem instance to zero-copy .bigd cache:
 ./zig-out/bin/big_ll solve data/raw/logistics/A-n33-k5.vrp --save-ir /tmp/A-n33-k5.bigd
 ```
+
+---
+
+## Known Limitations & Design Trade-offs
+
+In keeping with rigorous engineering transparency, `BIG-LL` is architected with specific microarchitectural trade-offs:
+
+1. **Fixed-Width Bitboard Representation**: Chromosomes are encoded as fixed-width bitboards ($L$ bits, multiple of 64). Problems requiring variable-length genotypes (e.g., recursive genetic programming trees) must encode solutions using fixed maximum-bound padding or index-mapped adapters.
+2. **Metal GPU Backend Specificity**: The zero-copy UMA GPU engine (>1.19 Billion evals/sec) utilizes native Apple Metal Shading Language (MSL) and macOS shared memory primitives (`MTLResourceStorageModeShared`). On Linux x86_64 and non-Apple ARM64 systems, `BIG-LL` operates via the high-throughput multi-island CPU engine (AVX2/NEON vector paths); native Vulkan/CUDA backends are not yet implemented.
+3. **Upfront Static Memory Pre-allocation**: To guarantee the zero runtime heap allocation invariant ($\Delta \text{Heap}(g) = 0$), all memory arenas, dual population slabs, deduplication hash tables, and linkage matrices are allocated during engine initialization. Very large batch sizes ($N > 4 \times 10^6, L > 4096$) require hundreds of megabytes of contiguous address space upfront.
+4. **Epistatic Linkage Quadratic Scaling ($O(L^2)$)**: Full pairwise bit co-occurrence tracking scales quadratically with chromosome bit-width. While highly efficient for $L \le 4096$ (fitting in cache/UMA), extreme problem dimensionalities ($L > 65,536$) require sparse block tiling or partitioned linkage learning.
+5. **Derivative-Free Gradient Invariance**: `BIG-LL` is designed for non-convex, combinatorial, non-differentiable, or rugged fitness landscapes. For purely smooth, convex continuous objectives, second-order gradient-based solvers or automatic differentiation frameworks (such as MLX or JAX) will converge in fewer function evaluations.
+
+---
+
+## Unix Manual Pages
+
+Complete BSD `mdoc(7)` manual pages are installed automatically to `zig-out/share/man/`:
+
+* **`big-ll(1)`**: Command-line interface, subcommands, island topologies, cluster transports.
+* **`libbig_ll(3)`**: C-ABI dynamic library prototypes and native Swift integration.
+* **`bigd(5)`**: 64-byte cacheline-aligned binary container specification.
+* **`big-ll-arch(7)`**: Apple Silicon microarchitectural guide, UMA zero-copy, 2.57:1 P/E island balancing.
+
+View installed manuals locally:
+```bash
+man -M "$PWD/zig-out/share/man" big-ll
+```
+
+---
+
+## Authors & Citation
+
+Created by **Sulkysubject37** (BioZig Systems Research Group).
+
+Foundational theory, convergence proofs, and microarchitectural co-design principles are detailed in the accompanying 44-page research monograph:
+> **M. Arshad**, *"On Genetic Algorithms: Microarchitectural Foundations, Theoretical Convergence, and Hardware-Centric Synthesis"*, BioZig Technical Report Series on Hardware-Aware Optimization, Vol. 1, No. 1, pp. 1–44, 2026.
+
+---
+
+## License
+
+[MIT License](LICENSE) — Copyright (c) 2026 Sulkysubject37.
