@@ -9,7 +9,7 @@ This document details the systems engineering principles and microarchitectural 
 * **Metal GPU Throughput (UMA Zero-Copy):** **>907.70 Million evaluations/second** on Markowitz portfolio quadratic programming ($N = 4,194,304$); **>711.76 Million evaluations/second** on OneMax ($L = 256$).
 * **Memory Invariant:** **Exactly 0 bytes of dynamic runtime heap allocations** during active generational evolutionary loops ($\Delta \text{Heap}(g) = 0$), verified via a strict `CountingAllocator` memory audit across 50+ continuous generations.
 * **Native Apple Toolchain & Telemetry:** Dynamic SoC core interrogation via `sysctlbyname("hw.perflevel*")`, zero-overhead Xcode Instruments profiling via `<os/signpost.h>` (`com.apple.bigll`), and zero-copy Swift Package Manager integration (`bindings/swift`).
-* **Theoretical Foundation:** Grounded in the formal companion monograph *On Genetic Algorithms: Microarchitectural Foundations, Theoretical Convergence, and Hardware-Centric Synthesis* (`docs/On_Genetic_Algorithms.pdf`).
+* **Hardware-Software Co-Design:** Engineered specifically for the unified memory and heterogeneous core architecture of Apple Silicon (M1 through M4).
 
 ---
 

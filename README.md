@@ -217,12 +217,9 @@ man -M "$PWD/zig-out/share/man" big-ll
 
 ---
 
-## Authors & Citation
+## Authors & Attribution
 
 Created by **Sulkysubject37** (BioZig Systems Research Group).
-
-Foundational theory, convergence proofs, and microarchitectural co-design principles are detailed in the accompanying 44-page research monograph:
-> **M. Arshad**, *"On Genetic Algorithms: Microarchitectural Foundations, Theoretical Convergence, and Hardware-Centric Synthesis"*, BioZig Technical Report Series on Hardware-Aware Optimization, Vol. 1, No. 1, pp. 1–44, 2026.
 
 ---
 
