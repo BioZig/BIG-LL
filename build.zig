@@ -51,6 +51,10 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(dylib);
     b.installFile("include/big_ll.h", "include/big_ll.h");
+    b.installFile("man/man1/big-ll.1", "share/man/man1/big-ll.1");
+    b.installFile("man/man3/libbig_ll.3", "share/man/man3/libbig_ll.3");
+    b.installFile("man/man5/bigd.5", "share/man/man5/bigd.5");
+    b.installFile("man/man7/big-ll-arch.7", "share/man/man7/big-ll-arch.7");
 
     const run_step = b.step("run", "Run BIG-LL CLI");
     const run_cmd = b.addRunArtifact(exe);

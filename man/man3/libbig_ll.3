@@ -1,0 +1,324 @@
+.\" Copyright (c) 2026 BioZig Systems Research Group.
+.\" All rights reserved.
+.Dd November 20, 2026
+.Dt LIBBIG_LL 3
+.Os "BioZig Systems"
+.Sh NAME
+.Nm libbig_ll
+.Nd C-ABI and Swift interface for zero-allocation evolutionary optimization
+.Sh LIBRARY
+.Lb libbig_ll
+.Sh SYNOPSIS
+.In big_ll.h
+.Vt "typedef void *big_ll_handle_t;"
+.Pp
+.Vt "typedef double (*big_ll_eval_fn)(const uint64_t *genes, size_t word_count, void *user_data);"
+.Pp
+.Bd -literal
+typedef struct {
+    bool   enable_dedup;
+    size_t num_threads;
+} big_ll_options_t;
+.Ed
+.Pp
+.Ft big_ll_handle_t
+.Fo big_ll_create
+.Fa "size_t chromosome_bits"
+.Fa "size_t pop_size"
+.Fa "uint64_t seed"
+.Fa "big_ll_eval_fn eval_fn"
+.Fa "void *user_data"
+.Fc
+.Pp
+.Ft big_ll_handle_t
+.Fo big_ll_create_custom
+.Fa "size_t chromosome_bits"
+.Fa "size_t pop_size"
+.Fa "uint64_t seed"
+.Fa "big_ll_eval_fn eval_fn"
+.Fa "void *user_data"
+.Fa "big_ll_options_t options"
+.Fc
+.Pp
+.Ft int
+.Fo big_ll_step
+.Fa "big_ll_handle_t handle"
+.Fc
+.Pp
+.Ft int
+.Fo big_ll_run
+.Fa "big_ll_handle_t handle"
+.Fa "size_t generations"
+.Fc
+.Pp
+.Ft double
+.Fo big_ll_get_best_fitness
+.Fa "big_ll_handle_t handle"
+.Fc
+.Pp
+.Ft size_t
+.Fo big_ll_get_best_genes
+.Fa "big_ll_handle_t handle"
+.Fa "uint64_t *out_buffer"
+.Fa "size_t buffer_words"
+.Fc
+.Pp
+.Ft "const uint64_t *"
+.Fo big_ll_get_best_genes_ptr
+.Fa "big_ll_handle_t handle"
+.Fc
+.Pp
+.Ft size_t
+.Fo big_ll_get_generation
+.Fa "big_ll_handle_t handle"
+.Fc
+.Pp
+.Ft size_t
+.Fo big_ll_get_pop_size
+.Fa "big_ll_handle_t handle"
+.Fc
+.Pp
+.Ft size_t
+.Fo big_ll_get_chromosome_bits
+.Fa "big_ll_handle_t handle"
+.Fc
+.Pp
+.Ft size_t
+.Fo big_ll_get_word_count
+.Fa "big_ll_handle_t handle"
+.Fc
+.Pp
+.Ft "const uint64_t *"
+.Fo big_ll_get_chromosome_words
+.Fa "big_ll_handle_t handle"
+.Fa "size_t index"
+.Fc
+.Pp
+.Ft double
+.Fo big_ll_get_chromosome_fitness
+.Fa "big_ll_handle_t handle"
+.Fa "size_t index"
+.Fc
+.Pp
+.Ft void
+.Fo big_ll_destroy
+.Fa "big_ll_handle_t handle"
+.Fc
+.Sh DESCRIPTION
+The
+.Nm
+library provides high-throughput, low-latency combinatorial optimization and
+genetic search capabilities via a stable C-ABI.
+It is engineered from first principles for zero runtime heap allocations
+.Pq Ql Delta Heap(g) = 0
+during generational iterations, maximum CPU L1 Data Cache residency, and
+direct integration with host languages including C, C++, Rust, Python, and
+Apple Swift.
+.Pp
+At initialization via
+.Fn big_ll_create
+or
+.Fn big_ll_create_custom ,
+the engine allocates two contiguous memory arenas representing the parent and
+offspring populations.
+Subsequent generational steps executed via
+.Fn big_ll_step
+or
+.Fn big_ll_run
+alternate pointers between these arenas, eliminating all calls to operating
+system allocators
+.Pq Fn malloc , Fn free
+within active search loops.
+.Sh DATA TYPES
+.Bl -tag -width "big_ll_options_t"
+.It Vt big_ll_handle_t
+An opaque pointer to an internal evolutionary solver state machine.
+Handles must be released by passing them to
+.Fn big_ll_destroy .
+.It Vt big_ll_eval_fn
+A function pointer pointing to the user's objective evaluation routine:
+.Pp
+.Dl "double (*big_ll_eval_fn)(const uint64_t *genes, size_t word_count, void *user_data);"
+.Pp
+The callback accepts a pointer to the 64-bit word array of the candidate
+chromosome, the number of 64-bit words
+.Pq Ar word_count ,
+and the user-supplied context pointer
+.Pq Ar user_data .
+The function must return an IEEE 754 double-precision floating-point fitness
+value (higher values indicate superior fitness).
+The callback must not mutate the memory pointed to by
+.Ar genes .
+.It Vt big_ll_options_t
+A configuration structure passed to
+.Fn big_ll_create_custom :
+.Bl -tag -width "num_threads" -compact
+.It Va enable_dedup
+A boolean flag.
+When set to true, the solver uses an internal 64-bit Robin Hood hash table
+to detect identical candidate chromosomes and skip duplicate evaluations.
+.It Va num_threads
+The number of worker threads to spawn for parallel fitness evaluation.
+Setting this to 0 defaults to the physical Performance core count detected
+on the host SoC.
+.El
+.El
+.Sh FUNCTIONS
+.Bl -tag -width "big_ll_get_chromosome_fitness"
+.It Fn big_ll_create "chromosome_bits" "pop_size" "seed" "eval_fn" "user_data"
+Allocates and initializes an evolutionary solver instance.
+.Ar chromosome_bits
+must be greater than 0 and a multiple of 64.
+.Ar pop_size
+specifies the candidate count per generation.
+.Ar seed
+initializes the internal 64-bit Wyhash pseudo-random generator.
+Returns an opaque handle on success, or
+.Dv NULL
+if parameters are invalid or memory allocation fails.
+.It Fn big_ll_create_custom "chromosome_bits" "pop_size" "seed" "eval_fn" "user_data" "options"
+Identical to
+.Fn big_ll_create ,
+but accepts fine-grained configuration flags via
+.Vt big_ll_options_t .
+.It Fn big_ll_step "handle"
+Advances the evolutionary simulation by exactly one generation.
+Returns 0 on success, or -1 if
+.Ar handle
+is invalid.
+.It Fn big_ll_run "handle" "generations"
+Advances the evolutionary simulation by
+.Ar generations
+consecutive iterations.
+Returns 0 on success, or -1 if
+.Ar handle
+is invalid.
+.It Fn big_ll_get_best_fitness "handle"
+Returns the floating-point fitness score of the elite individual currently
+discovered in the population.
+.It Fn big_ll_get_best_genes "handle" "out_buffer" "buffer_words"
+Copies the bitboard of the elite individual into
+.Ar out_buffer .
+At most
+.Ar buffer_words
+are copied.
+Returns the actual number of 64-bit words written.
+.It Fn big_ll_get_best_genes_ptr "handle"
+Returns a direct, read-only pointer to the 64-bit word array of the elite
+individual inside the active population arena.
+This pointer remains valid until the next invocation of
+.Fn big_ll_step ,
+.Fn big_ll_run ,
+or
+.Fn big_ll_destroy .
+.It Fn big_ll_get_generation "handle"
+Returns the 0-indexed count of completed generations.
+.It Fn big_ll_get_pop_size "handle"
+Returns the active population size.
+.It Fn big_ll_get_chromosome_bits "handle"
+Returns the total bit-width of each candidate chromosome.
+.It Fn big_ll_get_word_count "handle"
+Returns the number of 64-bit words representing each chromosome
+.Pq Ql word_count = chromosome_bits / 64 .
+.It Fn big_ll_get_chromosome_words "handle" "index"
+Returns a read-only pointer to the 64-bit word array for candidate individual
+at
+.Ar index .
+.Ar index
+must be strictly less than
+.Fn big_ll_get_pop_size .
+.It Fn big_ll_get_chromosome_fitness "handle" "index"
+Returns the fitness score evaluated for candidate individual at
+.Ar index .
+.It Fn big_ll_destroy "handle"
+Releases all memory arenas, thread pools, and resources associated with
+.Ar handle .
+Passing
+.Dv NULL
+is a safe no-op.
+.El
+.Sh SWIFT INTEGRATION
+Apple Swift projects can consume
+.Nm
+directly using Swift Package Manager.
+The Swift module
+.Nm BigLL
+wraps the C-ABI in an idiomatic, ARC-managed class
+.Vt BigLLSolver :
+.Bd -literal -offset indent
+import BigLL
+
+// Define an objective function via Swift closure
+let solver = BigLLSolver(chromosomeBits: 256, populationSize: 128) { words in
+    var ones = 0
+    for word in words {
+        ones += word.nonzeroBitCount
+    }
+    return Double(ones)
+}
+
+// Run 100 generations
+solver.run(generations: 100)
+
+let bestScore = solver.bestFitness
+print("Elite Fitness: ", bestScore)
+.Ed
+.Sh THREAD SAFETY
+Distinct
+.Vt big_ll_handle_t
+instances are fully isolated and may be executed concurrently across different
+threads without mutual locking.
+However, a single
+.Vt big_ll_handle_t
+is not re-entrant: concurrent calls to
+.Fn big_ll_step
+or accessor routines on the same handle from multiple threads without external
+synchronization invoke undefined behavior.
+.Sh EXAMPLES
+The following complete C99 program optimizes a 256-bit OneMax problem
+using
+.Nm :
+.Bd -literal -offset indent
+#include <stdio.h>
+#include <stdint.h>
+#include "big_ll.h"
+
+static double evaluate_onemax(
+    const uint64_t *genes,
+    size_t word_count,
+    void *user_data
+) {
+    (void)user_data;
+    double count = 0.0;
+    for (size_t i = 0; i < word_count; ++i) {
+        count += (double)__builtin_popcountll(genes[i]);
+    }
+    return count;
+}
+
+int main(void) {
+    big_ll_handle_t solver = big_ll_create(
+        256, 128, 42, evaluate_onemax, NULL
+    );
+    if (!solver) {
+        fprintf(stderr, "Failed to initialize solver\en");
+        return 1;
+    }
+
+    big_ll_run(solver, 100);
+
+    double elite_fit = big_ll_get_best_fitness(solver);
+    printf("Optimal fitness found: %.1f / 256.0\en", elite_fit);
+
+    big_ll_destroy(solver);
+    return 0;
+}
+.Ed
+.Sh SEE ALSO
+.Xr big-ll 1 ,
+.Xr bigd 5 ,
+.Xr big-ll-arch 7
+.Sh AUTHORS
+.An M. Arshad Aq Mt arshad10867c@gmail.com
+and the
+.An BioZig Systems Research Group .

@@ -1,0 +1,236 @@
+.\" Copyright (c) 2026 BioZig Systems Research Group.
+.\" All rights reserved.
+.Dd November 20, 2026
+.Dt BIGD 5
+.Os "BioZig Systems"
+.Sh NAME
+.Nm bigd
+.Nd binary problem instance format for BIG-LL evolutionary search
+.Sh SYNOPSIS
+.Pa filename.bigd
+.Sh DESCRIPTION
+The
+.Nm
+file format is a compact, little-endian, 64-byte cacheline-aligned binary
+container format specifically designed for storing combinatorial optimization
+instances evaluated by the
+.Xr big-ll 1
+evolutionary engine and
+.Xr libbig_ll 3
+library.
+.Pp
+By strictly maintaining 64-byte alignment for both the container header and
+subsequent data payloads,
+.Nm
+files can be mapped directly into user space via
+.Xr mmap 2
+and passed directly to Apple Silicon Metal GPU compute pipelines via
+.Li makeBuffer(bytesNoCopy:length:options:deallocator:)
+without intermediate memory copies or CPU bus re-alignment penalties.
+.Sh FILE LAYOUT
+A
+.Nm
+file consists of a mandatory 64-byte header immediately followed by contiguous
+payload data.
+All integer and floating-point fields are encoded in standard little-endian byte
+order.
+.Ss Binary Header Structure
+The first 64 bytes of the file are structured as follows:
+.Bd -literal -offset indent
+Offset  Size  Type       Field Name             Description
+------------------------------------------------------------------------
+0x00    4     char[4]    magic                  Magic bytes: "BIGD"
+0x04    2     uint16_t   version_major          File format major version (1)
+0x06    2     uint16_t   domain_id              Problem domain identifier
+0x08    4     uint32_t   chromosome_bits        Chromosome bit width (L)
+0x0C    4     uint32_t   word_count             64-bit word count (W = L / 64)
+0x10    8     uint64_t   seed_salt              PRNG initialization salt
+0x18    8     uint64_t   primary_payload_len    Primary payload size in bytes
+0x20    8     uint64_t   secondary_payload_len  Secondary payload size in bytes
+0x28    8     double     target_fitness         Reference or optimal fitness
+0x30    16    uint8_t[16] reserved              Reserved padding (zero-filled)
+0x40    ...   bytes      payload_data           Contiguous domain data
+.Ed
+.Ss Header Field Details
+.Bl -tag -width "chromosome_bits"
+.It Va magic
+A 4-byte ASCII signature:
+.Ql B , Ql I , Ql G , Ql D
+.Pq 0x42 0x49 0x47 0x44 .
+Parsers must reject any file whose leading 4 bytes do not match this magic
+sequence.
+.It Va version_major
+The format specification major version.
+Current specification version is 1.
+.It Va domain_id
+Identifies the mathematical problem domain and the semantic structure of the
+payload:
+.Bl -tag -width "3" -compact
+.It 1
+Finance (Markowitz Mean-Variance Portfolio Optimization).
+.It 2
+Telecom (5G/6G MIMO Multi-User Beamforming & Power Allocation).
+.It 3
+Bioinformatics (Molecular Contact Map & Conformation Search).
+.It 4
+Aerospace (Constellation Satellite Scheduling & Orbital Debris Avoidance).
+.El
+.It Va chromosome_bits
+The problem dimensionality
+.Ar L ,
+representing the number of binary decision variables in each candidate solution.
+Must be strictly greater than zero and an integer multiple of 64.
+Standard benchmark instances typically evaluate
+.Ar L
+in {256, 512, 1024, 2048, 4096}.
+.It Va word_count
+The number of 64-bit unsigned integers required to represent a single candidate
+bitboard
+.Pq Ql W = chromosome_bits / 64 .
+.It Va seed_salt
+A 64-bit unsigned integer used to seed synthetic problem generators or record
+the pseudo-random sequence identifier of the instance.
+.It Va primary_payload_len
+The size in bytes of the primary data payload starting at offset 0x40
+(byte 64).
+.It Va secondary_payload_len
+The size in bytes of the secondary data payload immediately following the
+primary payload.
+If an instance has no secondary payload, this field is set to 0.
+.It Va target_fitness
+An IEEE 754 double-precision floating-point value recording the known theoretical
+global optimum, mathematical upper bound, or classical heuristic baseline
+score for benchmark validation.
+.It Va reserved
+A 16-byte zero-filled padding block ensuring that the total header length is
+exactly 64 bytes (the native L1/L2 cacheline size of ARM64 and x86_64).
+.El
+.Sh DOMAIN PAYLOAD SPECIFICATIONS
+Payload data begins immediately at byte offset 64
+.Pq 0x40 .
+Its internal layout depends on
+.Va domain_id :
+.Ss Domain 1: Finance (Markowitz QP)
+.Bl -bullet
+.It
+.Sy Primary Payload :
+Expected asset return vector
+.Sm off
+.Pf \(mu \(in R^L
+.Sm on ,
+stored as an array of
+.Ar L
+single-precision IEEE 754 floats
+.Pq Ar L No * 4 bytes .
+.It
+.Sy Secondary Payload :
+Asset covariance matrix
+.Sm off
+.Pf \(Sigma \(in R^{L \times L}
+.Sm on ,
+stored as a row-major array of
+.Sm off
+.Pf L \(mu L
+.Sm on
+single-precision floats
+.Pq Ar L No * Ar L No * 4 bytes .
+.It
+.Sy Objective Function :
+Given candidate asset selection bitboard
+.Sm off
+.Pf x \(in {0, 1}^L
+.Sm on :
+.Pp
+.Dl "f(x) = dot(x, mu) - lambda * quad(x, Sigma, x) - penalty(norm_1(x) - K)"
+.El
+.Ss Domain 2: Telecom (MIMO Beamforming)
+.Bl -bullet
+.It
+.Sy Primary Payload :
+Channel state transfer matrix
+.Sm off
+.Pf H \(in C^{M \times K}
+.Sm on ,
+stored as contiguous interleaved real and imaginary float32 pairs.
+.It
+.Sy Secondary Payload :
+User Signal-to-Interference-plus-Noise (SINR) target vector and power
+constraint parameters.
+.El
+.Ss Domain 3: Bioinformatics
+.Bl -bullet
+.It
+.Sy Primary Payload :
+Residue-residue contact distance matrix or pairwise amino acid interaction
+tensor.
+.It
+.Sy Secondary Payload :
+Secondary structure propensity weights and solvent accessibility vector.
+.El
+.Ss Domain 4: Aerospace
+.Bl -bullet
+.It
+.Sy Primary Payload :
+Ground target observation reward raster.
+.It
+.Sy Secondary Payload :
+Orbital eclipse timeline and payload slewing constraint matrices.
+.El
+.Sh HARDWARE CONSIDERATIONS AND ZERO-COPY MAPPING
+Because
+.Nm
+guarantees that:
+.Bl -enum
+.It
+The file size is a multiple of 64 bytes,
+.It
+The header is exactly 64 bytes, and
+.It
+Payload data types are aligned to their natural word boundaries,
+.El
+.Pp
+operating systems can map
+.Nm
+files directly into memory using
+.Xr mmap 2 .
+On Apple Silicon, host virtual memory pages backed by an
+.Nm
+file can be shared directly with Metal compute shaders via the unified DRAM
+fabric:
+.Bd -literal -offset indent
+// Zero-copy Metal buffer initialization in Swift / Objective-C
+let buffer = device.makeBuffer(
+    bytesNoCopy: mmapPointer.advanced(by: 64),
+    length: payloadLength,
+    options: .storageModeShared,
+    deallocator: nil
+)
+.Ed
+.Sh UTILITIES
+The
+.Xr big-ll 1
+utility provides dedicated subcommands for manipulating
+.Nm
+files:
+.Bl -tag -width "big-ll generate-suite"
+.It Cm big-ll inspect Ar file.bigd
+Displays metadata, payload lengths, and target fitness for
+.Ar file.bigd .
+.It Cm big-ll generate Ar domain Ar out.bigd
+Generates a synthetic instance for the specified domain.
+.It Cm big-ll generate-suite Op Ar target_dir
+Generates a full benchmark suite across standard dimensions.
+.It Cm big-ll ingest-real Op Ar raw_dir Op Ar out_dir
+Compiles external raw CSV/NumPy datasets into aligned
+.Nm
+files.
+.El
+.Sh SEE ALSO
+.Xr big-ll 1 ,
+.Xr libbig_ll 3 ,
+.Xr big-ll-arch 7 ,
+.Xr mmap 2
+.Sh AUTHORS
+.An M. Arshad Aq Mt arshad10867c@gmail.com
+and the
+.An BioZig Systems Research Group .

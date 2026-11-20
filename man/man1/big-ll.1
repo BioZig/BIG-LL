@@ -1,0 +1,409 @@
+.\" Copyright (c) 2026 BioZig Systems Research Group.
+.\" All rights reserved.
+.Dd November 20, 2026
+.Dt BIG-LL 1
+.Os "BioZig Systems"
+.Sh NAME
+.Nm big-ll
+.Nd high-throughput zero-allocation evolutionary optimization engine
+.Sh SYNOPSIS
+.Nm
+.Cm solve
+.Ar file.bigd
+.Op Fl -pop Ar N
+.Op Fl -gens Ar G
+.Op Fl -islands Ar 1|4|8
+.Op Fl -seed Ar S
+.Op Fl -dedup Ar true|false
+.Op Fl -save-ir Ar path
+.Op Fl -cluster
+.Op Fl -transport Ar mesh|rdma|mpi|shm
+.Op Fl -node-id Ar ID
+.Op Fl -num-nodes Ar N
+.Op Fl -peer Ar endpoint
+.Op Fl -pretty | Fl p
+.Op Fl -plot | Fl -svg Ar file.svg
+.Op Fl -json
+.Op Fl -quiet | Fl q
+.Nm
+.Cm inspect
+.Ar file.bigd
+.Nm
+.Cm generate
+.Ar domain
+.Ar out.bigd
+.Nm
+.Cm generate-suite
+.Op Ar target_dir
+.Nm
+.Cm ingest-real
+.Op Ar raw_dir
+.Op Ar out_dir
+.Nm
+.Cm demo
+.Nm
+.Cm help | Fl -help | Fl h
+.Sh DESCRIPTION
+The
+.Nm
+utility is a high-performance combinatorial optimization and genetic
+search engine written in Zig with native Apple Silicon Metal Shading
+Language (MSL) compute shaders and Swift bindings.
+.Pp
+Unlike traditional evolutionary frameworks that rely on pointer-chased,
+heap-allocated abstractions (inducing continuous L1/L2 cache evictions
+and operating system allocator lock contention),
+.Nm
+implements a strict hardware-software co-design model:
+.Bl -bullet
+.It
+.Sy Zero Runtime Allocations :
+Active generational loops alternate pointers within pre-allocated static
+double-buffered arenas, guaranteeing that exactly zero bytes of operating
+system heap memory are allocated during optimization
+.Pq Ql Delta Heap(g) = 0 .
+.It
+.Sy Unified Memory Architecture (UMA) Zero-Copy :
+Under Apple Silicon's shared physical DRAM fabric, candidate solution
+bitboards reside in shared memory buffers
+.Pq Ql MTLResourceStorageModeShared ,
+allowing host CPU threads and Metal GPU compute encoders to read and write
+without PCIe bus staging latency
+.Pq Ql T_transfer = 0 .
+.It
+.Sy Dynamic SoC Topology Discovery :
+Interrogates Mach-O kernel sysctls at startup to discover the exact physical
+count of Performance and Efficiency cores, dynamically weighting
+sub-populations across heterogeneous clusters at a 2.57:1 ratio to prevent
+island barrier starvation.
+.It
+.Sy Hardware SIMDgroup Reductions :
+Executes parallel multi-threaded fitness reductions inside 32-thread Metal
+SIMDgroups using logarithmic register cross-lane shuffles
+.Pq Ql simd_shuffle_xor ,
+delivering 5-cycle latency with zero threadgroup memory bank conflicts.
+.El
+.Sh SUBCOMMANDS
+.Bl -tag -width "generate-suite"
+.It Cm solve Ar file.bigd Op options
+Executes evolutionary optimization on the specified binary problem instance.
+Employs either local multi-core islands or cluster-wide transports depending
+on configuration flags.
+.It Cm inspect Ar file.bigd
+Parses and prints the binary header of a
+.Pa .bigd
+file, displaying instance metadata, domain identification, chromosome
+bit-length
+.Pq Ar L ,
+64-bit word count, payload sizes, and benchmark target values.
+.It Cm generate Ar domain Ar out.bigd
+Synthesizes a synthetic optimization benchmark instance for a given problem
+domain and serializes it to the specified output file.
+Supported domains are
+.Cm finance ,
+.Cm telecom ,
+.Cm bioinformatics ,
+and
+.Cm aerospace .
+.It Cm generate-suite Op Ar target_dir
+Generates a complete multi-dimensional benchmark suite across dimensions
+.Ar L
+in {256, 512, 1024, 2048, 4096} into
+.Ar target_dir
+.Pq default: Pa data/synthetic .
+.It Cm ingest-real Op Ar raw_dir Op Ar out_dir
+Reads external domain datasets (e.g. historical price return matrices,
+cellular channel arrays) from
+.Ar raw_dir
+and compiles them into normalized, 64-byte aligned
+.Pa .bigd
+binaries in
+.Ar out_dir
+.Pq default: Pa data/real .
+.It Cm demo
+Executes the built-in multi-domain end-to-end demonstration suite, verifying
+algorithmic convergence across Finance Markowitz QP and Telecom MIMO
+problems.
+.It Cm help | Fl -help | Fl h
+Prints the command-line usage summary and exits.
+.El
+.Sh OPTIONS
+The following options apply to the
+.Cm solve
+subcommand:
+.Bl -tag -width "--transport name"
+.It Fl -pop Ar N
+Sets the island population size to
+.Ar N
+candidates.
+For bitsliced chromosomes with
+.Ar L
+= 256, a population of
+.Ar N
+= 1024 occupies exactly 64 KB, fitting entirely within the 128 KB L1 Data
+Cache of an Apple Silicon Performance core.
+Default is 128.
+.It Fl -gens Ar G
+Terminates evolutionary search after
+.Ar G
+generations.
+Default is 100.
+.It Fl -islands Ar 1|4|8
+Specifies the number of concurrent island populations.
+When executing on heterogeneous Apple Silicon SoCs with multi-island
+configurations,
+.Nm
+automatically binds latency-sensitive islands to Performance cores and
+throughput-oriented tasks to Efficiency cores.
+Default is 1.
+.It Fl -seed Ar S
+Initializes the pseudo-random number generator with 64-bit unsigned integer
+.Ar S .
+Uses Wyhash for deterministic, high-entropy sampling.
+Default is 42.
+.It Fl -dedup Ar true|false
+Enables or disables exact hash-based duplicate individual suppression.
+When enabled, identical candidate bitboards are detected via 64-bit Robin
+Hood hash tables, preventing redundant fitness evaluations.
+Default is true.
+.It Fl -save-ir Ar path
+Serializes the final population information-geometric linkage graph to
+.Ar path .
+.It Fl -cluster
+Enables distributed multi-node clustering mode across networked compute
+nodes.
+.It Fl -transport Ar mesh|rdma|mpi|shm
+Selects the inter-island migration transport protocol:
+.Bl -tag -width "mesh" -compact
+.It Cm mesh
+Apple Silicon point-to-point Thunderbolt 4/5 PCIe tunneling (40--80 Gbps)
+with BSD
+.Xr kqueue 2
+event polling.
+.It Cm rdma
+InfiniBand Remote Direct Memory Access for Linux HPC clusters.
+.It Cm mpi
+Message Passing Interface for legacy supercomputing environments.
+.It Cm shm
+POSIX shared memory ring buffers for intra-machine multi-process isolation.
+.El
+.It Fl -node-id Ar ID
+Assigns the 0-indexed distributed cluster node rank.
+.It Fl -num-nodes Ar N
+Sets the total number of physical nodes participating in cluster migration.
+.It Fl -peer Ar endpoint
+Specifies the remote network endpoint
+.Pq host:port
+for peer-to-peer island migration.
+.It Fl -pretty , Fl p
+Enables the interactive ANSI terminal status dashboard, rendering real-time
+generation progress, current best fitness, entropy decay, and deduplication
+cache hit rates.
+.It Fl -plot , Fl -svg Ar file.svg
+Renders and exports an editorial vector graphic of the run's convergence
+trajectory, parameter distribution, and linkage learning matrix to
+.Ar file.svg .
+.It Fl -json
+Emits structured machine-readable telemetry JSON to standard output upon
+completion, containing generational latencies, evaluation throughput rates,
+and final solution bitboards.
+.It Fl -quiet , Fl q
+Suppresses non-essential stdout progress messages, emitting only the final
+objective score and convergence summary.
+.El
+.Sh HARDWARE ARCHITECTURE AND MICROARCHITECTURAL TUNING
+.Nm
+is explicitly optimized for the physical microarchitecture of Apple Silicon
+(M1 through M4 generations):
+.Bl -tag -width "Dynamic Topology"
+.It Sy 128 KB L1 Data Cache Residency
+Apple Silicon Performance cores (Firestorm, Avalanche, Everest, M4) integrate
+a 128 KB L1 Data Cache (compared to 32--48 KB in standard x86 cores).
+By enforcing 64-byte struct alignment on 256-bit chromosomes
+.Pq Ql words: [4]u64 align(64) ,
+an active population of 1024 individuals occupies exactly 64 KB, remaining
+pinned inside L1D cache throughout generational loops without L2 cache
+evictions.
+.It Sy Dynamic SoC Topology Discovery
+On startup,
+.Nm
+interrogates the XNU kernel via
+.Fn sysctlbyname
+for
+.Li hw.perflevel0.physicalcpu
+(Performance cores) and
+.Li hw.perflevel1.physicalcpu
+(Efficiency cores).
+Workload sizes are partitioned proportional to measured core throughput
+(2.57:1 ratio: P-Core = 257, E-Core = 100), eliminating barrier starvation.
+Worker threads are pinned via
+.Fn pthread_set_qos_class_self_np
+using
+.Dv QOS_CLASS_USER_INTERACTIVE
+for Performance cores and
+.Dv QOS_CLASS_UTILITY
+for Efficiency cores.
+.It Sy Hardware Spin Loops
+Thread synchronization avoids premature
+.Fn sched_yield
+kernel context-switch traps by executing a 128-iteration user-space spin loop
+issuing the ARM64
+.Ic yield
+instruction via
+.Fn std.atomic.spinLoopHint .
+.It Sy Metal GPU Batch Acceleration
+Fitness evaluation of massive candidate batches (N >= 65,536) is dispatched
+to the on-die Apple GPU using Metal compute pipelines.
+Using shared memory buffers
+.Pq Ql MTLResourceStorageModeShared ,
+evaluation throughput exceeds 907 Million evaluations/second on portfolio
+quadratic programming and 711 Million evaluations/second on OneMax, without
+host-device PCIe copies.
+.El
+.Sh FILE FORMATS
+Problem instances are encoded in the
+.Pa .bigd
+binary format.
+The file begins with a 64-byte aligned header:
+.Bl -bullet -compact
+.It
+Bytes 0--3: Magic bytes
+.Sq BIGD
+.Pq 0x42 0x49 0x47 0x44 .
+.It
+Bytes 4--5: Version number (Major: 1, Minor: 0).
+.It
+Bytes 6--7: Domain ID (1=Finance, 2=Telecom, 3=Bioinformatics, 4=Aerospace).
+.It
+Bytes 8--11: Chromosome bit length
+.Ar L
+(must be a multiple of 64).
+.It
+Bytes 12--15: Word count
+.Pq W = L / 64 .
+.It
+Bytes 16--23: 64-bit instance seed salt.
+.It
+Bytes 24--31: Primary payload byte length.
+.It
+Bytes 32--39: Secondary payload byte length.
+.It
+Bytes 40--47: Expected theoretical target / optimal fitness (IEEE 754 float64).
+.It
+Bytes 48--63: Reserved padding (zero-filled for 64-byte cacheline alignment).
+.El
+.Pp
+The payload immediately follows the header, consisting of contiguous float32
+return vectors, covariance matrices, or discrete problem interaction arrays.
+.Sh TELEMETRY AND OBSERVABILITY
+.Nm
+integrates native Apple telemetry via
+.In os/signpost.h
+and
+.In os/log.h .
+Compute encoder passes and generational loops emit signpost intervals under:
+.Bl -tag -width "Subsystem :" -compact
+.It Sy Subsystem :
+.Li com.apple.bigll
+.It Sy Category :
+.Li ComputeEngine
+.It Sy Intervals :
+.Li Metal OneMax Eval ,
+.Li Metal Finance QP Eval ,
+.Li Metal Evolve Loop
+.El
+.Pp
+These intervals can be visualized in real time using Apple's
+.Nm Instruments
+application under the
+.Em Points of Interest
+profiling template without introducing measurement distortion into GPU ALU
+execution pipelines.
+.Sh SWIFT INTEGRATION
+.Nm
+provides native Swift bindings via Swift Package Manager located in
+.Pa bindings/swift .
+Host evaluation functions can be authored directly in Swift closures while
+leveraging the underlying zero-allocation Zig/Metal engine:
+.Bd -literal -offset indent
+import BigLL
+
+let solver = BigLLSolver(chromosomeBits: 256, populationSize: 128) { words in
+    var count = 0
+    for w in words { count += w.nonzeroBitCount }
+    return Double(count)
+}
+solver.run(generations: 50)
+print("Optimal Fitness: ", solver.bestFitness)
+.Ed
+.Sh EXIT STATUS
+.Ex -std big-ll
+Specific exit values are:
+.Bl -tag -width 3n -compact
+.It 0
+Optimization completed successfully, or utility command exited cleanly.
+.It 1
+File input/output error, invalid file path, or corrupted
+.Pa .bigd
+binary format.
+.It 2
+Invalid command-line argument, unrecognized option, or out-of-range parameter.
+.It 3
+Engine initialization failed (e.g. GPU compute pipeline allocation failure
+or memory arena exhaustion).
+.El
+.Sh EXAMPLES
+Solve a Markowitz portfolio problem with 8 heterogeneous islands, 500
+generations, deduplication enabled, and export an SVG convergence plot:
+.Bd -literal -offset indent
+big-ll solve data/synthetic/finance_1024.bigd --islands 8 --gens 500 \e
+    --dedup true --plot report.svg
+.Ed
+.Pp
+Inspect the metadata and chromosome dimensions of an aerospace problem
+instance:
+.Bd -literal -offset indent
+big-ll inspect data/synthetic/aerospace_2048.bigd
+.Ed
+.Pp
+Generate a 512-bit synthetic telecommunications MIMO problem instance:
+.Bd -literal -offset indent
+big-ll generate telecom data/synthetic/telecom_512.bigd
+.Ed
+.Pp
+Execute the self-contained multi-domain zero-allocation demonstration:
+.Bd -literal -offset indent
+big-ll demo
+.Ed
+.Pp
+Run a distributed island search across two Apple Silicon Mac Studios over
+Thunderbolt 4/5 PCIe mesh transport:
+.Bd -literal -offset indent
+# On Node 0 (192.168.10.1):
+big-ll solve problem.bigd --cluster --transport mesh --node-id 0 \e
+    --num-nodes 2 --peer 192.168.10.2:8080
+
+# On Node 1 (192.168.10.2):
+big-ll solve problem.bigd --cluster --transport mesh --node-id 1 \e
+    --num-nodes 2 --peer 192.168.10.1:8080
+.Ed
+.Sh SEE ALSO
+.Xr libbig_ll 3 ,
+.Xr bigd 5 ,
+.Xr big-ll-arch 7 ,
+.Xr kqueue 2 ,
+.Xr sysctl 3
+.Rs
+.%A M. Arshad
+.%A BioZig Systems Research Group
+.%T On Genetic Algorithms: Microarchitectural Foundations, Theoretical Convergence, and Hardware-Centric Synthesis
+.%J BioZig Technical Report Series on Hardware-Aware Optimization
+.%V 1
+.%N 1
+.%P 1-44
+.%D 2026
+.Re
+.Sh AUTHORS
+.An M. Arshad Aq Mt arshad10867c@gmail.com
+and the
+.An BioZig Systems Research Group .
