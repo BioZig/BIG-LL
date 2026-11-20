@@ -239,7 +239,7 @@ The ARM64 `yield` instruction signals the core pipeline to deprioritize thread e
 ## 4. Dedicated Metal GPU Compute Engine on Unified Memory (UMA)
 
 Traditional discrete GPU acceleration models (CUDA, ROCm) require transferring candidate populations across peripheral buses (PCIe Gen 4/5):
-$$T_{\text{PCIe}} = \alpha_{\text{launch}} + \frac{\text{Bytes transferred}}{\text{Bandwidth}_{\text{PCIe}}} \approx 10\text{--}80\,\mu\text{s}$$
+$$T_{\text{PCIe}} = \alpha_{\text{launch}} + \frac{\text{Bytes transferred}}{\text{Bandwidth}_{\text{PCIe}}} \approx 10\text{ to }80\,\mu\text{s}$$
 
 Because evolutionary operators have low arithmetic intensity ($\mathcal{I} \le \mathcal{O}(1)\text{ FLOP/byte}$), discrete accelerators spend more time in bus staging latency than executing instructions on the GPU ALUs.
 
@@ -295,7 +295,7 @@ Apple Silicon TBDR GPUs execute threads in lockstep groups of 32 threads, termed
 
 Rather than staging intermediate reduction states into shared threadgroup memory and invoking barrier synchronization (`threadgroup_barrier`), BIG-LL utilizes hardware **cross-lane shuffle instructions** (`simd_shuffle_xor`, `simd_prefix_inclusive_sum`).
 
-As proven in Section VII-E of the foundational monograph, a 32-thread SIMDgroup parallel reduction:
+For a 32-thread SIMDgroup parallel reduction:
 $$T_{\text{reduce}} = \log_2(32) = 5\text{ instruction cycles}$$
 executes with **0 bytes of threadgroup memory allocation** and **exactly 0 bank conflicts**, reading register states directly across ALU multiplexers.
 

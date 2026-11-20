@@ -85,9 +85,7 @@ $L = 128$ bits ($N = 128$ candidate loci).
 Bitboard extraction utilizes compiler intrinsic hardware trailing zero count (`@ctz`) to unpack active loci indices directly into registers in $O(|S|)$ operations without traversing unselected loci.
 
 ### Objective Function
-```text
-Score = sum_{i in S} w_i + 15.0 * sum_{(i,j) in E} 1(i, j in S) + 35.0 * 1(7, 42, 99 in S) - Penalty(|S| > 12)
-```
+$$\text{Score} = \sum_{i \in S} w_i + 15.0 \sum_{(i,j) \in E} \mathbb{I}(i, j \in S) + 35.0 \cdot \mathbb{I}(\{7, 42, 99\} \subseteq S) - \text{Penalty}(|S| > 12)$$
 
 ## 6. Algorithmic Trading & Portfolio Allocation (`finance.zig`)
 
