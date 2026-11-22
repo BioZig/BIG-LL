@@ -1,6 +1,7 @@
 # Build and cache artifacts
 .zig-cache/
 zig-out/
+dist/
 
 # Binary objects
 *.o
